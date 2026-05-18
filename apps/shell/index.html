@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Casual Office</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <!-- WIZARD: first-run only ------------------------------------------- -->
+    <div id="wizard" class="view wizard" hidden>
+      <div class="wiz-card">
+        <div class="wiz-progress" data-step="1">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+        </div>
+
+        <section class="wiz-step" data-step="1">
+          <h1>Welcome to Casual Office</h1>
+          <p class="sub">A local-only editor for Word and Excel documents. Let's set you up.</p>
+          <label class="field">
+            <span>Your name</span>
+            <input id="wiz-name" type="text" placeholder="e.g. Sachin" autocomplete="off" />
+          </label>
+          <p class="hint">Used as the author on documents you save. Stored locally; never sent anywhere.</p>
+          <div class="wiz-actions">
+            <button id="wiz-next-1" type="button" disabled>Continue</button>
+          </div>
+        </section>
+
+        <section class="wiz-step" data-step="2" hidden>
+          <h1>Pick a theme</h1>
+          <p class="sub">You can change this any time in settings.</p>
+          <div class="theme-grid" role="radiogroup" aria-label="Theme">
+            <label class="theme-card">
+              <input type="radio" name="theme" value="system" checked />
+              <span class="theme-preview system"></span>
+              <span>System</span>
+            </label>
+            <label class="theme-card">
+              <input type="radio" name="theme" value="light" />
+              <span class="theme-preview light"></span>
+              <span>Light</span>
+            </label>
+            <label class="theme-card">
+              <input type="radio" name="theme" value="dark" />
+              <span class="theme-preview dark"></span>
+              <span>Dark</span>
+            </label>
+          </div>
+          <div class="wiz-actions">
+            <button id="wiz-back-2" type="button" class="secondary">Back</button>
+            <button id="wiz-next-2" type="button">Continue</button>
+          </div>
+        </section>
+
+        <section class="wiz-step" data-step="3" hidden>
+          <h1>One last thing</h1>
+          <p class="sub">Where should we save new documents by default? You can override per file.</p>
+          <label class="field" for="wiz-dir">
+            <span>Default folder</span>
+          </label>
+          <div class="row">
+            <input id="wiz-dir" type="text" readonly placeholder="(use system default)" />
+            <button id="wiz-pick-dir" type="button" class="secondary">Choose…</button>
+            <button id="wiz-clear-dir" type="button" class="link">Clear</button>
+          </div>
+          <div class="wiz-actions">
+            <button id="wiz-back-3" type="button" class="secondary">Back</button>
+            <button id="wiz-finish" type="button">Finish setup</button>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- WORKSPACE: tab strip + active panel ------------------------------- -->
+    <div id="workspace" class="workspace" hidden>
+      <header class="tabbar">
+        <div id="tabstrip" class="tabstrip" role="tablist"></div>
+        <button id="new-tab" class="new-tab" title="New tab" aria-label="New tab">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 5v14"/><path d="M5 12h14"/>
+          </svg>
+        </button>
+        <div class="tabbar-right">
+          <button id="open-in-new-window" class="link icon-btn" title="Open active tab in a new window">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M14 4h6v6"/>
+              <path d="M20 4l-8 8"/>
+              <path d="M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>
+            </svg>
+          </button>
+          <div id="user-chip" class="user-chip" title="Profile">
+            <span id="user-avatar" class="avatar"></span>
+          </div>
+        </div>
+      </header>
+
+      <!-- Active panel: either the launcher home, or an iframe per editor tab. -->
+      <section id="panels" class="panels">
+        <!-- Home panel (re-mounted into the active launcher tab). -->
+        <div id="home-panel" class="panel home-panel">
+          <div class="hero">
+            <div class="hero-bg" aria-hidden="true">
+              <span class="blob blob-1"></span>
+              <span class="blob blob-2"></span>
+            </div>
+            <div class="hero-title">
+              <h1 id="greeting">Welcome back</h1>
+              <p class="sub" id="tagline">Open something, or start fresh.</p>
+            </div>
+          </div>
+
+          <section class="cards" aria-label="New document">
+            <button class="card card-docx" id="new-docx">
+              <span class="card-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/>
+                  <path d="M14 3v5h5"/>
+                  <path d="M9 13h6"/><path d="M9 17h6"/>
+                </svg>
+              </span>
+              <div>
+                <div class="card-title">New document</div>
+                <div class="card-sub">Blank .docx</div>
+              </div>
+            </button>
+            <button class="card card-sheets" id="new-sheets">
+              <span class="card-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="3" width="18" height="18" rx="2"/>
+                  <path d="M3 9h18"/><path d="M9 3v18"/>
+                </svg>
+              </span>
+              <div>
+                <div class="card-title">New spreadsheet</div>
+                <div class="card-sub">Blank .xlsx</div>
+              </div>
+            </button>
+            <button class="card card-open" id="open-file">
+              <span class="card-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+                </svg>
+              </span>
+              <div>
+                <div class="card-title">Open file</div>
+                <div class="card-sub">.docx or .xlsx from disk</div>
+              </div>
+            </button>
+          </section>
+
+          <section id="recent" class="recent" hidden>
+            <div class="recent-head">
+              <h2>Recent</h2>
+              <button id="clear-recents" type="button" class="link">Clear</button>
+            </div>
+            <ul id="recent-list" class="recent-list"></ul>
+          </section>
+
+          <section id="empty" class="empty" hidden>
+            <p>No recent files yet — open one to get started.</p>
+            <p class="hint">You can also drag a <code>.docx</code> or <code>.xlsx</code> onto this window.</p>
+          </section>
+
+          <footer id="status" class="status"></footer>
+        </div>
+
+        <!-- Editor iframes are injected here by JS, one per editor tab. -->
+        <div id="frames" class="frames"></div>
+      </section>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

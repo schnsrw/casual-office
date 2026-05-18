@@ -1,0 +1,17 @@
+{
+  "name": "deskapp",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Cross-platform desktop wrapper for the docx + sheets editors",
+  "scripts": {
+    "build:docx": "cd docx/docx-editor && bun install && bun run build:demo -- --base=./",
+    "build:sheets": "cd sheets && pnpm install && cd apps/web && pnpm vite build --base=./",
+    "build:editors": "pnpm build:docx && pnpm build:sheets",
+    "copy:editors": "bash apps/shell/scripts/copy-editors.sh",
+    "prep:editors": "pnpm build:editors && pnpm copy:editors",
+    "shell:dev": "cd apps/shell && pnpm dev",
+    "tauri:dev": "cd apps/shell && cargo tauri dev",
+    "tauri:build": "cd apps/shell && cargo tauri build"
+  },
+  "packageManager": "pnpm@9.15.9"
+}

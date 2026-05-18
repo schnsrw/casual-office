@@ -1,0 +1,24 @@
+[package]
+name = "deskapp-shell"
+version = "0.0.0"
+description = "deskApp — cross-platform document editor wrapper"
+authors = ["schnsrw"]
+edition = "2021"
+
+[lib]
+name = "deskapp_shell_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

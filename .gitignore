@@ -1,0 +1,27 @@
+node_modules/
+dist/
+build/
+target/
+*.log
+
+# Upstream editor repos are cloned in-tree but versioned separately
+# (each has its own .git/). Treat as external dependencies.
+/docx/
+/sheets/
+
+# Editor dists copied into the shell's public/ are build artifacts of the
+# upstream repos. Reproduce them with `pnpm prep:editors`.
+/apps/shell/public/docx/
+/apps/shell/public/sheets/
+
+# IDE / OS noise
+.DS_Store
+.vscode/
+.idea/
+*.iml
+*.swp
+
+# Tauri build output
+/apps/shell/src-tauri/target/
+/apps/shell/src-tauri/gen/
+.claude/
