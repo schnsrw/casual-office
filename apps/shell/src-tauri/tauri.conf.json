@@ -36,6 +36,22 @@
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.png"
+    ],
+    "fileAssociations": [
+      {
+        "ext": ["docx"],
+        "name": "Word Document",
+        "description": "Microsoft Word document",
+        "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "role": "Editor"
+      },
+      {
+        "ext": ["xlsx", "xlsm"],
+        "name": "Excel Workbook",
+        "description": "Microsoft Excel workbook",
+        "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "role": "Editor"
+      }
     ]
   }
 }

@@ -33,7 +33,13 @@ impl DocKind {
         let lower = path.to_lowercase();
         if lower.ends_with(".docx") {
             Some(DocKind::Docx)
-        } else if lower.ends_with(".xlsx") || lower.ends_with(".xlsm") {
+        } else if lower.ends_with(".xlsx")
+            || lower.ends_with(".xlsm")
+            || lower.ends_with(".ods")
+            || lower.ends_with(".csv")
+            || lower.ends_with(".tsv")
+            || lower.ends_with(".tab")
+        {
             Some(DocKind::Sheets)
         } else {
             None
@@ -167,18 +173,15 @@ async fn open_document_window(
         url.push_str(&urlencoding_lite(p));
     }
 
-    // Bridge script — injected before any editor JS runs. Phase 1 wrapper apps
-    // will import this surface from a real module instead of relying on the
-    // injected global, but for the spike this lets us prove the bridge wiring
-    // end-to-end without touching upstream code.
-    let init_script = build_bridge_script(file_path.as_deref());
-
+    // The editor's own `desk-bridge-bootstrap.ts` runs as the first import
+    // inside the new window; it defines window.__deskApp__ using either
+    // postMessage (iframe — no longer used) or window.__TAURI__.core
+    // (top-level window — the case here). No host-side injection needed.
     WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(url.into()))
         .title(&title)
         .inner_size(1280.0, 860.0)
-        .min_inner_size(640.0, 480.0)
+        .min_inner_size(720.0, 480.0)
         .resizable(true)
-        .initialization_script(&init_script)
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -187,46 +190,6 @@ async fn open_document_window(
     }
 
     Ok(title)
-}
-
-fn build_bridge_script(file_path: Option<&str>) -> String {
-    let path_json = match file_path {
-        Some(p) => serde_json::to_string(p).unwrap_or_else(|_| "null".into()),
-        None => "null".into(),
-    };
-    // Lean global. Phase 1 will harden this (typed methods, capability checks).
-    format!(
-        r#"window.__deskApp__ = Object.freeze({{
-  filePath: {path},
-  isDesktop: true,
-  async loadDocument(p) {{
-    const path = p ?? this.filePath;
-    if (!path) throw new Error("no file path");
-    const {{ invoke }} = window.__TAURI__.core;
-    const bytes = await invoke("load_document", {{ path }});
-    return new Uint8Array(bytes).buffer;
-  }},
-  async save(bytes) {{
-    if (!this.filePath) return this.saveAs("untitled", bytes);
-    const {{ invoke }} = window.__TAURI__.core;
-    await invoke("save_document", {{
-      path: this.filePath,
-      bytes: Array.from(new Uint8Array(bytes)),
-    }});
-    return this.filePath;
-  }},
-  async saveAs(suggestedName, bytes) {{
-    const {{ invoke }} = window.__TAURI__.core;
-    const path = await invoke("save_document_as", {{
-      suggestedName,
-      bytes: Array.from(new Uint8Array(bytes)),
-    }});
-    return path;
-  }},
-}});
-"#,
-        path = path_json
-    )
 }
 
 #[tauri::command]

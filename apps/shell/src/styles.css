@@ -213,8 +213,30 @@ input[type='text']:focus { border-color: var(--accent); box-shadow: 0 0 0 3px co
  * ========================================================================== */
 .workspace {
   display: grid;
-  grid-template-rows: 40px 1fr;
+  grid-template-rows: 44px 1fr;
   height: 100vh;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+  user-select: none;
+  -webkit-app-region: drag; /* hint to native window dragging */
+}
+.topbar .brand {
+  display: flex; align-items: center; gap: 8px;
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: -0.005em;
+}
+.brand-dot {
+  width: 14px; height: 14px;
+  border-radius: 4px;
+  background: linear-gradient(135deg, var(--docx), var(--sheets));
 }
 
 .tabbar {

@@ -70,7 +70,16 @@ function relTime(epochSecs: number): string {
 function kindFromPath(path: string): DocKind | null {
   const lower = path.toLowerCase();
   if (lower.endsWith('.docx')) return 'docx';
-  if (lower.endsWith('.xlsx') || lower.endsWith('.xlsm')) return 'sheets';
+  if (
+    lower.endsWith('.xlsx') ||
+    lower.endsWith('.xlsm') ||
+    lower.endsWith('.ods') ||
+    lower.endsWith('.csv') ||
+    lower.endsWith('.tsv') ||
+    lower.endsWith('.tab')
+  ) {
+    return 'sheets';
+  }
   return null;
 }
 
@@ -418,26 +427,22 @@ function activeTab(): Tab | undefined {
 }
 
 function openOrReplaceLauncher(kind: DocKind, filePath: string | null) {
-  // Sticky tab: if this exact file is already open in any tab, focus that
-  // tab instead of spawning a duplicate. Untitled (no path) tabs aren't
-  // deduped — every "New blank doc" should be its own tab.
-  if (filePath) {
-    const existing = state.tabs.find(
-      (t) => t.kind === kind && t.filePath === filePath,
-    );
-    if (existing) {
-      activateTab(existing.id);
-      return;
-    }
-  }
-  // If the active tab is a launcher, replace it with the editor (Chrome-like:
-  // clicking a card in the new-tab page navigates that tab).
-  const cur = activeTab();
-  if (cur?.kind === 'launcher') {
-    openDocumentInTab(kind, filePath, cur.id);
-  } else {
-    openDocumentInTab(kind, filePath);
-  }
+  // One-window-per-document. Each opened doc gets its own native Tauri
+  // window with its own webview process — matches the speed and isolation
+  // of native Excel / Word / LibreOffice. The launcher itself stays open
+  // as the "home" window so the user can keep opening more documents.
+  invoke('open_document_window', { kind, filePath })
+    .then(() => {
+      if (filePath) {
+        invoke('add_recent_file', { path: filePath }).catch(() => undefined);
+        refreshRecents();
+      }
+      setStatus('');
+    })
+    .catch((err) => {
+      console.error('open_document_window failed', err);
+      setStatus(`Could not open: ${err}`);
+    });
 }
 
 // =============================================================================
@@ -489,9 +494,10 @@ function bindHomePanel() {
       multiple: false,
       directory: false,
       filters: [
-        { name: 'Documents', extensions: ['docx', 'xlsx', 'xlsm'] },
-        { name: 'Word', extensions: ['docx'] },
-        { name: 'Excel', extensions: ['xlsx', 'xlsm'] },
+        { name: 'All supported', extensions: ['docx', 'xlsx', 'xlsm', 'ods', 'csv', 'tsv', 'tab'] },
+        { name: 'Word document', extensions: ['docx'] },
+        { name: 'Spreadsheet', extensions: ['xlsx', 'xlsm', 'ods'] },
+        { name: 'Delimited', extensions: ['csv', 'tsv', 'tab'] },
       ],
     });
     if (!selected || typeof selected !== 'string') return;
@@ -513,14 +519,8 @@ function bindHomePanel() {
 }
 
 function bindTabBar() {
-  $('new-tab').addEventListener('click', () => openLauncherTab());
-  $('open-in-new-window').addEventListener('click', () => {
-    const cur = activeTab();
-    if (!cur || cur.kind === 'launcher') return;
-    invoke('open_document_window', { kind: cur.kind, filePath: cur.filePath }).catch((err) => {
-      setStatus(`Could not pop out: ${err}`);
-    });
-  });
+  // Tabs were removed in favor of one-window-per-document. No-op kept so
+  // boot() doesn't need conditional branches.
 }
 
 // =============================================================================
@@ -558,13 +558,10 @@ async function bindDragDrop() {
 function bindShortcuts() {
   window.addEventListener('keydown', (e) => {
     const meta = e.ctrlKey || e.metaKey;
-    if (meta && e.key.toLowerCase() === 't') {
+    // Ctrl/Cmd-O — quick "Open file…" from the launcher.
+    if (meta && e.key.toLowerCase() === 'o') {
       e.preventDefault();
-      openLauncherTab();
-    }
-    if (meta && e.key.toLowerCase() === 'w') {
-      e.preventDefault();
-      if (state.activeTabId) closeTab(state.activeTabId);
+      $('open-file').click();
     }
   });
 }
@@ -687,7 +684,7 @@ function revealWorkspace() {
     const partOfDay = hr < 5 ? 'Working late' : hr < 12 ? 'Good morning' : hr < 18 ? 'Good afternoon' : 'Good evening';
     greet.textContent = `${partOfDay}, ${state.profile.name.split(/\s+/)[0]}`;
   }
-  if (state.tabs.length === 0) openLauncherTab();
+  refreshRecents();
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {

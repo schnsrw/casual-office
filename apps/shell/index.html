@@ -72,32 +72,19 @@
       </div>
     </div>
 
-    <!-- WORKSPACE: tab strip + active panel ------------------------------- -->
+    <!-- WORKSPACE: launcher home only — documents open as separate windows -->
     <div id="workspace" class="workspace" hidden>
-      <header class="tabbar">
-        <div id="tabstrip" class="tabstrip" role="tablist"></div>
-        <button id="new-tab" class="new-tab" title="New tab" aria-label="New tab">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M12 5v14"/><path d="M5 12h14"/>
-          </svg>
-        </button>
-        <div class="tabbar-right">
-          <button id="open-in-new-window" class="link icon-btn" title="Open active tab in a new window">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M14 4h6v6"/>
-              <path d="M20 4l-8 8"/>
-              <path d="M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4"/>
-            </svg>
-          </button>
-          <div id="user-chip" class="user-chip" title="Profile">
-            <span id="user-avatar" class="avatar"></span>
-          </div>
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-dot" aria-hidden="true"></span>
+          <span>Casual Office</span>
+        </div>
+        <div id="user-chip" class="user-chip" title="Profile">
+          <span id="user-avatar" class="avatar"></span>
         </div>
       </header>
 
-      <!-- Active panel: either the launcher home, or an iframe per editor tab. -->
       <section id="panels" class="panels">
-        <!-- Home panel (re-mounted into the active launcher tab). -->
         <div id="home-panel" class="panel home-panel">
           <div class="hero">
             <div class="hero-bg" aria-hidden="true">
@@ -164,9 +151,6 @@
 
           <footer id="status" class="status"></footer>
         </div>
-
-        <!-- Editor iframes are injected here by JS, one per editor tab. -->
-        <div id="frames" class="frames"></div>
       </section>
     </div>
 
