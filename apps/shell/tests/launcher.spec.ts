@@ -137,37 +137,56 @@ test.describe('Recent files', () => {
     await expect(page.locator('#recent')).toBeHidden();
   });
 
-  test('renders pinned-first and supports search filter', async ({ page }) => {
+  test('groups by time, separates pinned, and supports search filter', async ({ page }) => {
+    const now = Math.floor(Date.now() / 1000);
     await mockTauri(page, {
       recents: [
-        { path: '/home/u/report.docx', kind: 'docx', last_opened: 1_700_000_000, pinned: true },
-        { path: '/home/u/numbers.xlsx', kind: 'sheets', last_opened: 1_700_000_001, pinned: false },
-        { path: '/home/u/notes.docx', kind: 'docx', last_opened: 1_700_000_002, pinned: false },
+        { path: '/home/u/report.docx', kind: 'docx', last_opened: now - 60, pinned: true },
+        { path: '/home/u/numbers.xlsx', kind: 'sheets', last_opened: now - 120, pinned: false },
+        { path: '/home/u/notes.docx', kind: 'docx', last_opened: now - 5 * 86400, pinned: false },
       ],
     });
     await page.goto('/');
     await expect(page.locator('#recent')).toBeVisible();
-    const items = page.locator('#recent-list li');
-    await expect(items).toHaveCount(3);
-    // First item is the pinned one (Rust would sort; we mirror that).
-    await expect(items.nth(0).locator('.pin-mark')).toBeVisible();
+    const cards = page.locator('.recent-card');
+    await expect(cards).toHaveCount(3);
+    // Pinned bucket exists.
+    await expect(page.locator('.recent-group-head h3', { hasText: 'Pinned' })).toBeVisible();
 
     await page.locator('#recent-search').fill('numbers');
-    await expect(items).toHaveCount(1);
-    await expect(page.locator('#recent-list .recent-name')).toContainText('numbers.xlsx');
+    await expect(cards).toHaveCount(1);
+    await expect(page.locator('.recent-card-name')).toContainText('numbers.xlsx');
 
     await page.locator('#recent-search').fill('does-not-exist');
     await expect(page.locator('#recent-no-match')).toBeVisible();
   });
 
-  test('right-click opens the context menu', async ({ page }) => {
+  test('type filter narrows by kind', async ({ page }) => {
+    const now = Math.floor(Date.now() / 1000);
     await mockTauri(page, {
       recents: [
-        { path: '/home/u/x.docx', kind: 'docx', last_opened: 1_700_000_000, pinned: false },
+        { path: '/home/u/a.docx', kind: 'docx', last_opened: now - 60, pinned: false },
+        { path: '/home/u/b.xlsx', kind: 'sheets', last_opened: now - 60, pinned: false },
       ],
     });
     await page.goto('/');
-    await page.locator('#recent-list li').first().click({ button: 'right' });
+    await expect(page.locator('.recent-card')).toHaveCount(2);
+    await page.locator('.filter-btn', { hasText: 'Documents' }).click();
+    await expect(page.locator('.recent-card')).toHaveCount(1);
+    await expect(page.locator('.recent-card-name')).toContainText('a.docx');
+    await page.locator('.filter-btn', { hasText: 'All' }).click();
+    await expect(page.locator('.recent-card')).toHaveCount(2);
+  });
+
+  test('right-click opens the context menu', async ({ page }) => {
+    const now = Math.floor(Date.now() / 1000);
+    await mockTauri(page, {
+      recents: [
+        { path: '/home/u/x.docx', kind: 'docx', last_opened: now - 60, pinned: false },
+      ],
+    });
+    await page.goto('/');
+    await page.locator('.recent-card').first().click({ button: 'right' });
     await expect(page.locator('.context-menu')).toBeVisible();
     await expect(page.locator('.context-menu-item').first()).toHaveText('Open');
     await page.keyboard.press('Escape');

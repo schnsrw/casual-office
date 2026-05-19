@@ -254,6 +254,64 @@ function askOpenChoice(kind: DocKind, filePath: string | null) {
  *  re-render without re-hitting Rust on every keystroke. */
 let lastRecentList: RecentFile[] = [];
 let recentSearchQuery = '';
+let recentTypeFilter: 'all' | 'docx' | 'sheets' = 'all';
+
+/** Stable "what bucket does this file belong in" classifier. Office's
+ *  Backstage view groups recent files the same way. */
+function groupKeyFor(epochSecs: number): string {
+  const now = new Date();
+  const then = new Date(epochSecs * 1000);
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const oneDay = 86400_000;
+  const diffDays = Math.floor((startOfToday - new Date(then.getFullYear(), then.getMonth(), then.getDate()).getTime()) / oneDay);
+  if (epochSecs * 1000 >= startOfToday) return 'today';
+  if (diffDays === 1) return 'yesterday';
+  if (diffDays <= 7) return 'this-week';
+  if (diffDays <= 30) return 'this-month';
+  return 'older';
+}
+
+const GROUP_LABELS: Record<string, string> = {
+  pinned: 'Pinned',
+  today: 'Today',
+  yesterday: 'Yesterday',
+  'this-week': 'Earlier this week',
+  'this-month': 'Earlier this month',
+  older: 'Older',
+};
+
+const GROUP_ORDER = ['pinned', 'today', 'yesterday', 'this-week', 'this-month', 'older'];
+
+/** Stylized file icon — a 40×52 "page" shape (blue for docx, green for
+ *  xlsx) with simulated content lines / grid. Not a real thumbnail, but
+ *  visually consistent with how Office's Backstage represents files. */
+function fileIconSvg(kind: DocKind): string {
+  if (kind === 'docx') {
+    return `
+<svg class="file-icon" viewBox="0 0 40 52" aria-hidden="true">
+  <rect x="0.5" y="0.5" width="39" height="51" rx="3" ry="3" fill="#fff" stroke="#2563eb33"/>
+  <rect x="0.5" y="0.5" width="39" height="10" rx="3" ry="3" fill="#2563eb"/>
+  <rect x="6" y="18" width="28" height="2.5" rx="1" fill="#2563eb55"/>
+  <rect x="6" y="24" width="22" height="2.5" rx="1" fill="#2563eb44"/>
+  <rect x="6" y="30" width="26" height="2.5" rx="1" fill="#2563eb44"/>
+  <rect x="6" y="36" width="18" height="2.5" rx="1" fill="#2563eb44"/>
+  <rect x="6" y="42" width="24" height="2.5" rx="1" fill="#2563eb44"/>
+</svg>`;
+  }
+  return `
+<svg class="file-icon" viewBox="0 0 40 52" aria-hidden="true">
+  <rect x="0.5" y="0.5" width="39" height="51" rx="3" ry="3" fill="#fff" stroke="#1e7a4f33"/>
+  <rect x="0.5" y="0.5" width="39" height="10" rx="3" ry="3" fill="#1e7a4f"/>
+  <g stroke="#1e7a4f55" stroke-width="0.8">
+    <line x1="6" y1="20" x2="34" y2="20"/>
+    <line x1="6" y1="28" x2="34" y2="28"/>
+    <line x1="6" y1="36" x2="34" y2="36"/>
+    <line x1="6" y1="44" x2="34" y2="44"/>
+    <line x1="16" y1="16" x2="16" y2="48"/>
+    <line x1="26" y1="16" x2="26" y2="48"/>
+  </g>
+</svg>`;
+}
 
 async function refreshRecents() {
   try {
@@ -268,8 +326,8 @@ function renderRecents() {
   const recent = $('recent');
   const empty = $('empty');
   const noMatch = $('recent-no-match');
-  const recentList = $<HTMLUListElement>('recent-list');
-  recentList.innerHTML = '';
+  const groupsEl = $('recent-groups');
+  groupsEl.innerHTML = '';
   if (lastRecentList.length === 0) {
     recent.hidden = true;
     empty.hidden = false;
@@ -279,15 +337,19 @@ function renderRecents() {
   recent.hidden = false;
   empty.hidden = true;
 
-  // Filter by search; pinned bubble to top via the Rust-side ordering.
+  // Apply filters
   const q = recentSearchQuery.trim().toLowerCase();
-  const matches = q
-    ? lastRecentList.filter(
-        (f) =>
-          f.path.toLowerCase().includes(q) ||
-          basename(f.path).toLowerCase().includes(q),
+  const matches = lastRecentList.filter((f) => {
+    if (recentTypeFilter !== 'all' && f.kind !== recentTypeFilter) return false;
+    if (q) {
+      if (
+        !f.path.toLowerCase().includes(q) &&
+        !basename(f.path).toLowerCase().includes(q)
       )
-    : lastRecentList;
+        return false;
+    }
+    return true;
+  });
 
   if (matches.length === 0) {
     noMatch.hidden = false;
@@ -295,33 +357,52 @@ function renderRecents() {
   }
   noMatch.hidden = true;
 
+  // Group: pinned files go in their own bucket regardless of recency.
+  const groups = new Map<string, RecentFile[]>();
   for (const f of matches) {
-    const li = document.createElement('li');
-    li.setAttribute('role', 'button');
-    li.tabIndex = 0;
-    li.title = f.path;
-    if (f.pinned) li.classList.add('pinned');
-    li.innerHTML = `
-      <div class="recent-icon ${f.kind}"></div>
-      <div class="recent-meta">
-        <div class="recent-name">
-          ${f.pinned ? '<span class="pin-mark" aria-label="Pinned">★</span>' : ''}
-          ${escapeHtml(basename(f.path))}
+    const key = f.pinned ? 'pinned' : groupKeyFor(f.last_opened);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(f);
+  }
+
+  for (const key of GROUP_ORDER) {
+    const list = groups.get(key);
+    if (!list || list.length === 0) continue;
+    const section = document.createElement('div');
+    section.className = 'recent-group';
+
+    const heading = document.createElement('div');
+    heading.className = 'recent-group-head';
+    heading.innerHTML = `<h3>${escapeHtml(GROUP_LABELS[key] ?? key)}</h3><span class="recent-group-count">${list.length}</span>`;
+    section.appendChild(heading);
+
+    const grid = document.createElement('div');
+    grid.className = 'recent-grid';
+    for (const f of list) {
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = `recent-card${f.pinned ? ' pinned' : ''}`;
+      card.title = f.path;
+      card.innerHTML = `
+        ${fileIconSvg(f.kind)}
+        <div class="recent-card-meta">
+          <div class="recent-card-name">
+            ${f.pinned ? '<span class="pin-mark" aria-label="Pinned">★</span>' : ''}
+            ${escapeHtml(basename(f.path))}
+          </div>
+          <div class="recent-card-path">${escapeHtml(dirname(f.path))}</div>
+          <div class="recent-card-time">${escapeHtml(relTime(f.last_opened))}</div>
         </div>
-        <div class="recent-path">${escapeHtml(dirname(f.path))}</div>
-      </div>
-      <div class="recent-time">${escapeHtml(relTime(f.last_opened))}</div>
-    `;
-    const onClick = () => openRecent(f);
-    li.addEventListener('click', onClick);
-    li.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') onClick();
-    });
-    li.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      openRecentContextMenu(f, e.clientX, e.clientY);
-    });
-    recentList.appendChild(li);
+      `;
+      card.addEventListener('click', () => openRecent(f));
+      card.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        openRecentContextMenu(f, e.clientX, e.clientY);
+      });
+      grid.appendChild(card);
+    }
+    section.appendChild(grid);
+    groupsEl.appendChild(section);
   }
 }
 
@@ -493,6 +574,18 @@ function bindHomePanel() {
     recentSearchQuery = search.value;
     renderRecents();
   });
+
+  // Type-filter buttons (All / Documents / Spreadsheets).
+  for (const btn of document.querySelectorAll<HTMLButtonElement>('.filter-btn')) {
+    btn.addEventListener('click', () => {
+      for (const other of document.querySelectorAll('.filter-btn')) {
+        other.classList.remove('active');
+      }
+      btn.classList.add('active');
+      recentTypeFilter = (btn.dataset.filter as typeof recentTypeFilter) ?? 'all';
+      renderRecents();
+    });
+  }
 }
 
 // =============================================================================

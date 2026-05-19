@@ -179,16 +179,10 @@
         </div>
 
         <div id="home-panel" class="panel home-panel">
-          <div class="hero">
-            <div class="hero-bg" aria-hidden="true">
-              <span class="blob blob-1"></span>
-              <span class="blob blob-2"></span>
-            </div>
-            <div class="hero-title">
-              <h1 id="greeting">Welcome back</h1>
-              <p class="sub" id="tagline">Open something, or start fresh.</p>
-            </div>
-          </div>
+          <header class="home-head">
+            <h1 id="greeting">Welcome back</h1>
+            <p class="sub" id="tagline">Open something, or start fresh.</p>
+          </header>
 
           <section class="cards" aria-label="New document">
             <button class="card card-docx" id="new-docx">
@@ -231,7 +225,7 @@
 
           <section id="recent" class="recent" hidden>
             <div class="recent-head">
-              <h2>Recent &amp; pinned</h2>
+              <h2>Your files</h2>
               <div class="recent-tools">
                 <label class="recent-search">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -239,10 +233,15 @@
                   </svg>
                   <input id="recent-search" type="text" placeholder="Search recent…" autocomplete="off" />
                 </label>
+                <div class="recent-filter" role="tablist" aria-label="Filter by type">
+                  <button class="filter-btn active" data-filter="all" type="button">All</button>
+                  <button class="filter-btn" data-filter="docx" type="button">Documents</button>
+                  <button class="filter-btn" data-filter="sheets" type="button">Spreadsheets</button>
+                </div>
                 <button id="clear-recents" type="button" class="link">Clear all</button>
               </div>
             </div>
-            <ul id="recent-list" class="recent-list"></ul>
+            <div id="recent-groups" class="recent-groups"></div>
             <p id="recent-no-match" class="hint recent-no-match" hidden>No recent files match that search.</p>
           </section>
 
