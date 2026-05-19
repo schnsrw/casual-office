@@ -117,6 +117,21 @@ fn add_recent_file(
     Ok(())
 }
 
+/// Remove a single entry from the recents list — used by the launcher
+/// when it discovers a stale path (file moved/deleted on disk).
+#[tauri::command]
+fn remove_recent_file(
+    app: AppHandle,
+    state: tauri::State<'_, RecentsState>,
+    path: String,
+) -> Result<(), String> {
+    let mut list = state.list.lock().unwrap();
+    list.retain(|r| r.path != path);
+    let snapshot = list.clone();
+    drop(list);
+    save_recents(&app, &snapshot)
+}
+
 fn touch_recent(app: &AppHandle, state: &RecentsState, path: &str) {
     let Some(kind) = DocKind::from_path(path) else {
         return;
@@ -137,10 +152,11 @@ fn touch_recent(app: &AppHandle, state: &RecentsState, path: &str) {
     let _ = save_recents(app, &snapshot);
 }
 
-/// Open a per-document Tauri window. Phase 0 spike: each window loads the
-/// editor's built dist from /docx/index.html or /sheets/index.html.
-/// Phase 1 will replace these with our own wrapper apps that import the
-/// editor as a library and wire `window.__deskApp__` for native save/load.
+/// Open a per-document Tauri window. Each opened file becomes a top-level
+/// webview window so the editor gets its own process and event loop. If a
+/// window is already showing the same file (sticky behavior), focus that
+/// one instead of opening a duplicate — matches the convention of Excel
+/// and Word when you double-click a file that's already open.
 #[tauri::command]
 async fn open_document_window(
     app: AppHandle,
@@ -148,6 +164,30 @@ async fn open_document_window(
     kind: DocKind,
     file_path: Option<String>,
 ) -> Result<String, String> {
+    // Sticky-window: if this exact file is already open in another doc
+    // window, focus that one instead of creating a duplicate.
+    if let Some(p) = file_path.as_deref() {
+        for window in app.webview_windows().values() {
+            let label = window.label();
+            if !label.starts_with("doc-") {
+                continue;
+            }
+            if let Ok(url) = window.url() {
+                if let Some(q) = url.query() {
+                    let mut wants = "file=".to_string();
+                    wants.push_str(&urlencoding_lite(p));
+                    if q.contains(&wants) {
+                        let _ = window.show();
+                        let _ = window.unminimize();
+                        let _ = window.set_focus();
+                        touch_recent(&app, &state, p);
+                        return Ok(label.to_string());
+                    }
+                }
+            }
+        }
+    }
+
     let id = WINDOW_SEQ.fetch_add(1, Ordering::SeqCst);
     let label = format!("doc-{id}");
 
@@ -195,6 +235,14 @@ async fn open_document_window(
 #[tauri::command]
 async fn load_document(path: String) -> Result<Vec<u8>, String> {
     std::fs::read(&path).map_err(|e| format!("read {path}: {e}"))
+}
+
+/// Cheap existence check used by the launcher before opening a recent
+/// file — saves the user from a confusing "couldn't render" if the file
+/// has been moved or deleted since it was last opened.
+#[tauri::command]
+fn file_exists(path: String) -> bool {
+    std::path::Path::new(&path).is_file()
 }
 
 #[tauri::command]
@@ -505,7 +553,9 @@ pub fn run() {
             get_recent_files,
             clear_recent_files,
             add_recent_file,
+            remove_recent_file,
             load_document,
+            file_exists,
             save_document,
             save_document_as,
             is_first_run,

@@ -7,7 +7,6 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 // =============================================================================
 
 type DocKind = 'docx' | 'sheets';
-type TabKind = 'launcher' | DocKind;
 
 interface RecentFile {
   path: string;
@@ -52,14 +51,6 @@ const CHANGELOG: ReadonlyArray<{ version: string; title: string; highlights: str
     ],
   },
 ];
-
-interface Tab {
-  id: string;
-  kind: TabKind;
-  title: string;
-  filePath: string | null; // null for launcher and untitled docs
-  iframe?: HTMLIFrameElement;
-}
 
 // =============================================================================
 // Tiny helpers
@@ -160,323 +151,13 @@ function toast(message: string, kind: ToastKind = 'default', durationMs = 3000) 
 }
 
 // =============================================================================
-// Bridge: each editor iframe talks to the host via postMessage. The editor
-// inside the iframe sets up its own `window.__deskApp__` from its bootstrap
-// module — this avoids the load-event race where iframe-injected globals
-// arrive after the editor's initial useEffect already ran.
-//
-// The router below listens for `{ src: 'deskApp', kind: 'request', ... }`
-// from any iframe, looks up the source tab, and dispatches the appropriate
-// Tauri command. Replies are posted back with the same id.
-// =============================================================================
-
-interface BridgeRequest {
-  src: 'deskApp';
-  kind: 'request';
-  id: number;
-  method: 'loadDocument' | 'save' | 'saveAs';
-  params: Record<string, unknown>;
-}
-
-function tabForSource(source: MessageEventSource | null): Tab | undefined {
-  if (!source) return undefined;
-  return state.tabs.find((t) => t.iframe?.contentWindow === source);
-}
-
-async function handleBridgeRequest(tab: Tab, req: BridgeRequest): Promise<unknown> {
-  const { method, params } = req;
-  if (method === 'loadDocument') {
-    const path = (params.path as string | null | undefined) ?? tab.filePath;
-    if (!path) throw new Error('no file path bound to this tab');
-    return await invoke<number[]>('load_document', { path });
-  }
-  if (method === 'save') {
-    const bytes = params.bytes as number[];
-    // Product rule: Save writes back to the bound filePath. If untitled,
-    // prompt once for a location (acts like Save As on first save).
-    if (tab.filePath) {
-      await invoke('save_document', { path: tab.filePath, bytes });
-      return tab.filePath;
-    }
-    const written = await invoke<string | null>('save_document_as', {
-      suggestedName: suggestedNameForKind(tab.kind),
-      bytes,
-    });
-    if (written) bindPathToTab(tab.id, written);
-    return written;
-  }
-  if (method === 'saveAs') {
-    const bytes = params.bytes as number[];
-    const suggestedName = (params.suggestedName as string) || suggestedNameForKind(tab.kind);
-    const written = await invoke<string | null>('save_document_as', {
-      suggestedName,
-      bytes,
-    });
-    if (written) bindPathToTab(tab.id, written);
-    return written;
-  }
-  throw new Error(`unknown bridge method: ${method}`);
-}
-
-function bindBridgeRouter() {
-  window.addEventListener('message', async (event) => {
-    const data = event.data as BridgeRequest | null;
-    if (!data || data.src !== 'deskApp' || data.kind !== 'request') return;
-    const tab = tabForSource(event.source);
-    const reply = (result: unknown, error?: string) => {
-      (event.source as Window | null)?.postMessage(
-        { src: 'deskApp', kind: 'reply', id: data.id, result, error },
-        { targetOrigin: event.origin || '*' },
-      );
-    };
-    if (!tab) return reply(null, 'no tab matches the requesting iframe');
-    try {
-      const result = await handleBridgeRequest(tab, data);
-      reply(result);
-    } catch (err) {
-      reply(null, err instanceof Error ? err.message : String(err));
-    }
-  });
-}
-
-function suggestedNameForKind(kind: TabKind): string {
-  if (kind === 'docx') return 'Untitled.docx';
-  if (kind === 'sheets') return 'Untitled.xlsx';
-  return 'Untitled';
-}
-
-// =============================================================================
 // State
 // =============================================================================
 
 const state = {
   profile: null as Profile | null,
   settings: { theme: 'system', default_save_dir: null } as Settings,
-  tabs: [] as Tab[],
-  activeTabId: '' as string,
-  draggingTabId: null as string | null,
 };
-
-// Threshold (px below the tab strip) at which a drag is treated as
-// "detach this tab into a new window" (Chrome-style).
-const DETACH_THRESHOLD_PX = 100;
-
-// =============================================================================
-// Tabs: rendering, switching, lifecycle
-// =============================================================================
-
-function renderTabs() {
-  const strip = $('tabstrip');
-  strip.innerHTML = '';
-  for (const tab of state.tabs) {
-    const el = document.createElement('div');
-    el.className = 'tab';
-    el.dataset.tabId = tab.id;
-    if (tab.id === state.activeTabId) el.classList.add('active');
-    el.setAttribute('role', 'tab');
-    el.tabIndex = 0;
-
-    const icon = document.createElement('span');
-    icon.className = `tab-icon ${tab.kind}`;
-    el.appendChild(icon);
-
-    const label = document.createElement('span');
-    label.className = 'tab-title';
-    label.textContent = tab.title;
-    label.title = tab.filePath || tab.title;
-    el.appendChild(label);
-
-    const closeBtn = document.createElement('button');
-    closeBtn.className = 'tab-close';
-    closeBtn.setAttribute('aria-label', `Close ${tab.title}`);
-    closeBtn.innerHTML = '×';
-    closeBtn.addEventListener('mousedown', (e) => {
-      e.stopPropagation();
-      e.preventDefault();
-      closeTab(tab.id);
-    });
-    el.appendChild(closeBtn);
-
-    el.addEventListener('mousedown', (e) => {
-      if (e.button === 1) {
-        // middle-click closes (Chrome convention)
-        e.preventDefault();
-        closeTab(tab.id);
-        return;
-      }
-      activateTab(tab.id);
-    });
-    el.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') activateTab(tab.id);
-      if (e.key === 'Delete' || ((e.ctrlKey || e.metaKey) && e.key === 'w')) {
-        e.preventDefault();
-        closeTab(tab.id);
-      }
-    });
-
-    // Drag-out support: Chrome-style detach-to-new-window when the user
-    // drags the tab vertically past a threshold below the tab strip.
-    // Launcher tabs aren't detachable (they're just an empty home view).
-    if (tab.kind !== 'launcher') {
-      el.draggable = true;
-      el.addEventListener('dragstart', (e) => {
-        state.draggingTabId = tab.id;
-        el.classList.add('dragging');
-        if (e.dataTransfer) {
-          e.dataTransfer.effectAllowed = 'move';
-          e.dataTransfer.setData('text/plain', `deskapp-tab:${tab.id}`);
-        }
-      });
-      el.addEventListener('dragend', (e) => {
-        el.classList.remove('dragging');
-        const draggingId = state.draggingTabId;
-        state.draggingTabId = null;
-        if (!draggingId) return;
-        const tabbar = document.querySelector<HTMLElement>('.tabbar');
-        if (!tabbar) return;
-        const rect = tabbar.getBoundingClientRect();
-        // Drag ended below the tab bar by threshold, OR outside the window
-        // entirely (clientX/Y are 0 when dropped past the OS window).
-        const droppedOutside =
-          e.clientY === 0 && e.clientX === 0
-            ? true
-            : e.clientY > rect.bottom + DETACH_THRESHOLD_PX;
-        if (droppedOutside) detachTab(draggingId);
-      });
-    }
-    strip.appendChild(el);
-  }
-}
-
-async function detachTab(tabId: string) {
-  const tab = state.tabs.find((t) => t.id === tabId);
-  if (!tab || tab.kind === 'launcher') return;
-  try {
-    await invoke('open_document_window', { kind: tab.kind, filePath: tab.filePath });
-    closeTab(tabId);
-  } catch (err) {
-    console.error('detachTab failed', err);
-    setStatus(`Could not detach tab: ${err}`);
-  }
-}
-
-function activateTab(id: string) {
-  if (state.activeTabId === id) return;
-  state.activeTabId = id;
-  syncPanels();
-  renderTabs();
-}
-
-function syncPanels() {
-  const homePanel = $('home-panel');
-  const framesEl = $('frames');
-  const active = state.tabs.find((t) => t.id === state.activeTabId);
-  if (!active) {
-    homePanel.hidden = true;
-    framesEl.hidden = true;
-    return;
-  }
-  if (active.kind === 'launcher') {
-    homePanel.hidden = false;
-    framesEl.hidden = true;
-    // Hide all iframes.
-    for (const tab of state.tabs) tab.iframe?.classList.remove('active');
-    refreshRecents();
-  } else {
-    homePanel.hidden = true;
-    framesEl.hidden = false;
-    for (const tab of state.tabs) {
-      if (tab.iframe) {
-        if (tab.id === active.id) tab.iframe.classList.add('active');
-        else tab.iframe.classList.remove('active');
-      }
-    }
-  }
-}
-
-function openLauncherTab() {
-  const tab: Tab = {
-    id: uid(),
-    kind: 'launcher',
-    title: 'Home',
-    filePath: null,
-  };
-  state.tabs.push(tab);
-  state.activeTabId = tab.id;
-  renderTabs();
-  syncPanels();
-}
-
-async function openDocumentInTab(kind: DocKind, filePath: string | null, replaceTabId?: string) {
-  const title = filePath ? basename(filePath) : suggestedNameForKind(kind);
-  const newTab: Tab = { id: uid(), kind, title, filePath };
-
-  // Build the iframe lazily so we don't pay for editor JS until needed.
-  // Pass `?desk=1` + optional `?file=...` — the editor's
-  // desk-bridge-bootstrap.ts reads these and wires window.__deskApp__
-  // before any other module runs.
-  const iframe = document.createElement('iframe');
-  iframe.className = 'editor-frame';
-  iframe.dataset.tabId = newTab.id;
-  iframe.setAttribute('title', title);
-  const params = new URLSearchParams({ desk: '1' });
-  if (filePath) params.set('file', filePath);
-  iframe.src = `${kind}/index.html?${params.toString()}`;
-  newTab.iframe = iframe;
-  $('frames').appendChild(iframe);
-
-  if (replaceTabId) {
-    // Replace the launcher (or another tab) with this editor in place.
-    const idx = state.tabs.findIndex((t) => t.id === replaceTabId);
-    if (idx >= 0) {
-      const old = state.tabs[idx];
-      old.iframe?.remove();
-      state.tabs[idx] = newTab;
-    } else {
-      state.tabs.push(newTab);
-    }
-  } else {
-    state.tabs.push(newTab);
-  }
-  state.activeTabId = newTab.id;
-  renderTabs();
-  syncPanels();
-
-  if (filePath) {
-    invoke('add_recent_file', { path: filePath }).catch(() => {
-      /* recents persistence is best-effort */
-    });
-  }
-}
-
-function bindPathToTab(tabId: string, path: string) {
-  const tab = state.tabs.find((t) => t.id === tabId);
-  if (!tab) return;
-  tab.filePath = path;
-  tab.title = basename(path);
-  renderTabs();
-}
-
-function closeTab(id: string) {
-  const idx = state.tabs.findIndex((t) => t.id === id);
-  if (idx < 0) return;
-  const tab = state.tabs[idx];
-  tab.iframe?.remove();
-  state.tabs.splice(idx, 1);
-  if (state.tabs.length === 0) {
-    openLauncherTab();
-    return;
-  }
-  if (state.activeTabId === id) {
-    state.activeTabId = state.tabs[Math.min(idx, state.tabs.length - 1)].id;
-  }
-  renderTabs();
-  syncPanels();
-}
-
-function activeTab(): Tab | undefined {
-  return state.tabs.find((t) => t.id === state.activeTabId);
-}
 
 function openOrReplaceLauncher(kind: DocKind, filePath: string | null) {
   const pref = state.settings.open_window_preference ?? 'ask';
@@ -595,7 +276,7 @@ async function refreshRecents() {
         </div>
         <div class="recent-time">${escapeHtml(relTime(f.last_opened))}</div>
       `;
-      const onClick = () => openOrReplaceLauncher(f.kind, f.path);
+      const onClick = () => openRecent(f);
       li.addEventListener('click', onClick);
       li.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') onClick();
@@ -605,6 +286,32 @@ async function refreshRecents() {
   } catch (err) {
     console.error('refreshRecents failed', err);
   }
+}
+
+/**
+ * Open a recent file with a pre-flight existence check. If the path no
+ * longer exists (user moved or deleted it since it was last opened),
+ * show an actionable error toast instead of opening an editor that
+ * silently fails to render.
+ */
+async function openRecent(f: RecentFile) {
+  let exists = true;
+  try {
+    exists = await invoke<boolean>('file_exists', { path: f.path });
+  } catch {
+    /* if the check itself fails, fall through and let the editor decide */
+  }
+  if (!exists) {
+    toast(`Couldn't find ${basename(f.path)} — removed from recents.`, 'error', 4500);
+    try {
+      await invoke('remove_recent_file', { path: f.path });
+    } catch {
+      /* best-effort */
+    }
+    await refreshRecents();
+    return;
+  }
+  openOrReplaceLauncher(f.kind, f.path);
 }
 
 function bindHomePanel() {
@@ -622,7 +329,7 @@ function bindHomePanel() {
     if (!selected || typeof selected !== 'string') return;
     const kind = kindFromPath(selected);
     if (!kind) {
-      setStatus(`Unsupported file: ${selected}`);
+      toast(`Unsupported file: ${basename(selected)}`, 'error', 4000);
       return;
     }
     openOrReplaceLauncher(kind, selected);
@@ -636,11 +343,6 @@ function bindHomePanel() {
     await refreshRecents();
     toast('Recent files cleared');
   });
-}
-
-function bindTabBar() {
-  // Tabs were removed in favor of one-window-per-document. No-op kept so
-  // boot() doesn't need conditional branches.
 }
 
 // =============================================================================
@@ -903,8 +605,7 @@ async function finishWizard() {
     if (!errorEl) {
       errorEl = document.createElement('p');
       errorEl.id = 'wiz-error';
-      errorEl.className = 'hint';
-      errorEl.style.color = '#dc2626';
+      errorEl.className = 'settings-error';
       finishBtn.parentElement?.insertBefore(errorEl, finishBtn);
     }
     errorEl.textContent = `Could not save: ${err instanceof Error ? err.message : err}`;
@@ -1075,6 +776,14 @@ function populateSettings() {
   for (const radio of document.querySelectorAll<HTMLInputElement>('input[name=settings-theme]')) {
     radio.checked = radio.value === state.settings.theme;
   }
+  // App version in About — cheap call, but only on settings-open to keep
+  // boot light.
+  invoke<string>('get_app_version')
+    .then((v) => {
+      const el = document.getElementById('settings-version');
+      if (el) el.textContent = `v${v}`;
+    })
+    .catch(() => undefined);
 }
 
 function bindSettings() {
@@ -1173,9 +882,7 @@ async function boot() {
   bindWizard();
   bindHomePanel();
   bindSettings();
-  bindTabBar();
   bindShortcuts();
-  bindBridgeRouter();
   // Drag-drop binding is fire-and-forget; failures shouldn't block boot.
   bindDragDrop();
 

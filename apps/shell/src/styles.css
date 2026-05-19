@@ -735,6 +735,34 @@ em.muted { color: var(--muted); font-style: normal; font-size: 11px; }
   line-height: 1.5;
 }
 .settings-about p.muted { color: var(--muted); }
+.version-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  margin-left: 4px;
+  background: var(--tile);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font: 500 11px ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--muted);
+  vertical-align: 1px;
+}
+
+/* Respect user OS-level "Reduce motion" preference. Cuts our entry
+   animations to a hard cut. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Sharp focus rings — relying on browser defaults gives inconsistent
+   look across themes/platforms. */
+:where(button, input, [role='button'], [tabindex]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 
 /* Slightly bolder card icons for the two "create" actions and a subtle
    differentiator on "Open file" so it reads as a distinct verb. */
