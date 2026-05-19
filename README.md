@@ -55,38 +55,55 @@ pnpm tauri:build
 ```
 
 The launcher comes up first; on a fresh install a setup wizard collects your
-name + theme + default save folder, then the home screen appears.
+name + email + timezone + theme + default save folder, then the home
+screen appears. Click the user chip in the top-right to edit any of it
+later, including a profile picture.
 
 ## What works today
 
-- First-run setup wizard (name, theme, default folder)
+- First-run setup wizard (name, email, timezone, theme, default folder)
+- Profile picture (any image; copied into the app config dir)
+- Settings page (top-right chip → edit anything)
 - Home screen with recent files (persisted at
   `~/.config/live.schnsrw.casualoffice/recent.json`)
-- Open `.docx` / `.xlsx` from disk → opens in a new tab
+- Open `.docx`, `.xlsx`, `.xlsm`, `.ods`, `.csv`, `.tsv` from disk
+- Open-where dialog: "this window or new window?" with Remember-my-choice
+- One Tauri window per document — own webview process, own event loop
 - Save = writes back to the original path; Save As / new doc = native save
   dialog
-- Drag a tab below the tab strip → detaches into a new OS window
 - Drag-and-drop a file onto the launcher to open it
-- Sticky tabs: opening a file that's already open focuses the existing tab
+- File associations declared for `.docx` / `.xlsx` / `.xlsm` — once
+  installed, set Casual Office as the OS default in your file manager
+- DevTools enabled in release: right-click → Inspect Element
 
 ## Architecture in one diagram
 
 ```
-┌─────────────────────────── Casual Office window ───────────────────────────┐
-│  ┌─────────────────────────────────────────────────────────────────────┐  │
-│  │  Tab strip          [Home] [doc.docx ×] [sheet.xlsx ×]  [+]         │  │
-│  ├─────────────────────────────────────────────────────────────────────┤  │
-│  │  Panel (active tab):                                                │  │
-│  │    • Home panel  → hero + cards + recent list                       │  │
-│  │    • Editor iframe → docx or sheets dist, ?desk=1&file=…            │  │
-│  │                                                                     │  │
-│  │  Bridge: iframe ⇄ launcher via postMessage ⇄ Tauri commands         │  │
-│  └─────────────────────────────────────────────────────────────────────┘  │
-└────────────────────────────────────────────────────────────────────────────┘
-                    │ load_document / save_document / save_document_as
-                    ▼
-   Tauri 2 Rust core  →  std::fs   (filesystem owns persistence)
-                      →  native OS file dialogs
+                              Casual Office (Tauri 2)
+                         ┌─────────────┴─────────────┐
+                         ▼                           ▼
+                  ┌──────────────┐         ┌─────────────────┐
+                  │  Launcher    │         │  Doc window 1   │  ← own webview
+                  │  window      │         │  (.docx)        │    process
+                  │              │         └─────────────────┘
+                  │  • Wizard    │         ┌─────────────────┐
+                  │  • Home      │         │  Doc window 2   │  ← own webview
+                  │  • Settings  │         │  (.xlsx)        │    process
+                  │  • Open-where│         └─────────────────┘
+                  └──────┬───────┘                  …
+                         │ invoke('open_document_window', { kind, file })
+                         ▼
+                ┌──────────────────────────────────────────────┐
+                │  Tauri Rust core  (apps/shell/src-tauri)     │
+                │  load / save / save-as / recents /           │
+                │  profile / settings / avatar / open-window   │
+                └──────────────────┬───────────────────────────┘
+                                   ▼
+                ~/.config/live.schnsrw.casualoffice/
+                  ├─ profile.json    (name, email, timezone, avatar_path)
+                  ├─ settings.json   (theme, default folder, open prefs)
+                  ├─ recent.json
+                  └─ avatar.<ext>
 ```
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full breakdown,

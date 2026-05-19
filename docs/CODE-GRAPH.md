@@ -28,22 +28,22 @@ casual-office/
         ├── package.json
         ├── vite.config.ts
         ├── tsconfig.json
-        ├── index.html         ← launcher chrome markup (wizard + tabs + home)
+        ├── index.html         ← wizard + workspace home + settings + open-where modal
         ├── public/            ← Vite copies into dist/ at build time
-        │   ├── docx/          ← copied from docx/docx-editor/examples/vite/dist/
-        │   └── sheets/        ← copied from sheets/apps/web/dist/
+        │   ├── docx/          ← copied from docx/docx-editor/examples/vite/dist/  (gitignored)
+        │   └── sheets/        ← copied from sheets/apps/web/dist/                 (gitignored)
         ├── dist/              ← Vite output, embedded into the Tauri binary
         ├── assets/
         │   └── icon.svg       ← source-of-truth icon (rasterized to PNGs in src-tauri/icons/)
         ├── scripts/
         │   └── copy-editors.sh
         ├── src/
-        │   ├── main.ts        ← launcher logic — tabs, wizard, postMessage router, drag-drop
-        │   └── styles.css     ← theme tokens + view + hero/cards/tabs styling
+        │   ├── main.ts        ← launcher logic — wizard, settings, open-where modal, recents
+        │   └── styles.css     ← theme tokens + view + hero/cards/settings/modal styling
         └── src-tauri/
-            ├── Cargo.toml
+            ├── Cargo.toml     ← tauri features = ["devtools"] (right-click → Inspect in release)
             ├── build.rs
-            ├── tauri.conf.json
+            ├── tauri.conf.json     ← withGlobalTauri=true, fileAssociations for .docx/.xlsx/.xlsm
             ├── capabilities/
             │   └── default.json
             ├── icons/         ← generated PNGs at 32/128/128@2x/512
@@ -62,11 +62,11 @@ casual-office/
    ┌─────────────────────────┬──────────────────────────┐
    ↓                         ↓                          ↓
  @tauri-apps/api/core    @tauri-apps/plugin-dialog   @tauri-apps/api/window
-   (invoke)                (open file picker)         (drag-drop events)
+   (invoke)                (open + save dialogs)      (drag-drop events)
         │                        │                          │
         ▼                        ▼                          ▼
    ╔══════════════════════════════════════════════════════════╗
-   ║  Tauri 2 IPC bridge → lib.rs commands (see below)        ║
+   ║  Tauri 2 IPC → lib.rs commands (table below)             ║
    ╚══════════════════════════════════════════════════════════╝
 ```
 
@@ -74,16 +74,16 @@ casual-office/
 
 | Section | Function |
 |---|---|
-| Types | `DocKind`, `Tab`, `Profile`, `Settings`, `BridgeRequest` |
-| Tiny helpers | `escapeHtml`, `basename`, `dirname`, `relTime`, `kindFromPath`, `initials`, `hashHue`, `uid`, `applyTheme`, `setStatus`, `withTimeout` |
-| **Bridge router** | `tabForSource`, `handleBridgeRequest`, `bindBridgeRouter` — listens for postMessages from editor iframes and dispatches Tauri commands |
-| State | `state` (tabs, activeTabId, profile, settings, draggingTabId) |
-| **Tabs lifecycle** | `renderTabs`, `activateTab`, `syncPanels`, `openLauncherTab`, `openDocumentInTab`, `closeTab`, `activeTab`, `bindPathToTab`, `openOrReplaceLauncher` (sticky-tab logic), `detachTab` (drag-out → new window) |
-| Home panel | `refreshRecents`, `bindHomePanel` |
-| Tabbar | `bindTabBar` (new-tab button, pop-out current tab) |
-| Drag-drop | `bindDragDrop` (open files dropped on the window) |
-| Shortcuts | `bindShortcuts` (Ctrl+T, Ctrl+W) |
+| Types | `DocKind`, `RecentFile`, `Profile`, `Settings` |
+| Helpers | `escapeHtml`, `basename`, `dirname`, `relTime`, `kindFromPath`, `initials`, `hashHue`, `applyTheme`, `setStatus`, `withTimeout`, `detectTimezone` |
+| State | `state` (profile, settings) |
+| **Document opening** | `openOrReplaceLauncher` (consults `settings.open_window_preference`), `askOpenChoice` (modal), `doOpen` (either navigates the launcher window via `window.location.href` or spawns a new Tauri window via `open_document_window`) |
+| Home panel | `refreshRecents`, `bindHomePanel`, `bindTabBar` (no-op stub kept for boot wiring) |
+| Drag-drop | `bindDragDrop` (open files dropped on the launcher) — overlay was removed; drops still work |
+| Shortcuts | `bindShortcuts` (Ctrl/Cmd-O = Open file) |
 | Wizard | `WizardState`, `showWizardStep`, `bindWizard`, `finishWizard` |
+| **Avatar** | `renderAvatar`, `avatarDataUrlCache` — reads user-picked image via `read_avatar_bytes`, encodes as data URL |
+| **Settings panel** | `showSettings`, `hideSettings`, `populateSettings`, `bindSettings` — edit name / email / timezone / theme / default folder / profile picture |
 | Boot | `revealWorkspace`, `boot` |
 
 ## Rust commands (lib.rs)
@@ -91,50 +91,63 @@ casual-office/
 | Command | Purpose | JS caller |
 |---|---|---|
 | `is_first_run` | True if `profile.json` is missing | `boot()` |
-| `get_profile`, `save_profile` | Read/write `~/.config/live.schnsrw.casualoffice/profile.json` | Wizard, launcher boot |
-| `get_settings`, `save_settings` | Read/write `~/.config/.../settings.json` | Wizard, launcher boot |
-| `get_recent_files`, `clear_recent_files`, `add_recent_file` | Manage `recent.json` (last 20, move-to-front) | Home panel, openDocumentInTab |
-| `load_document` | `std::fs::read(path)` → bytes | Bridge router on `loadDocument` |
-| `save_document` | `std::fs::write(path, bytes)` | Bridge router on `save` (path known) |
-| `save_document_as` | Native save dialog + write + recent-file touch | Bridge router on `save` (untitled) or `saveAs` |
-| `open_document_window` | Spawn a new Tauri webview window with `?desk=1&file=…` | "Open in new window" + drag-tab-out |
+| `get_profile`, `save_profile` | Read/write `profile.json` | Wizard, Settings save |
+| `pick_avatar_image` | Native image picker → copy into config dir as `avatar.<ext>` → return new path | Settings: "Change picture…" |
+| `read_avatar_bytes` | Read avatar bytes for data-URL rendering in the launcher | `renderAvatar` |
+| `get_settings`, `save_settings` | Read/write `settings.json` | Wizard, Settings save, open-where remember |
+| `get_recent_files`, `clear_recent_files`, `add_recent_file` | Manage `recent.json` (last 20, move-to-front) | Home panel, `doOpen` |
+| `load_document` | `std::fs::read(path)` → bytes | Editor bootstrap on `loadDocument` |
+| `save_document` | `std::fs::write(path, bytes)` | Editor on `save` (path known) |
+| `save_document_as` | Native save dialog + write + recent-file touch | Editor on `save` (untitled) or `saveAs` |
+| `open_document_window` | Spawn a new top-level Tauri webview window with `?desk=1&file=…` | `doOpen` when "new window" chosen |
 
 All custom commands are registered in `tauri::generate_handler![]`. Plugin
 commands come from `tauri_plugin_dialog::init()` and `tauri_plugin_fs::init()`.
 
-## Bridge protocol (postMessage shape)
+## Bridge: how the editor talks to Tauri
 
-### Request (iframe → parent launcher)
-```ts
-{ src: 'deskApp',
-  kind: 'request',
-  id: number,                         // monotonic per iframe
-  method: 'loadDocument' | 'save' | 'saveAs',
-  params: { path?, bytes?, suggestedName? } }
+The editors run in top-level Tauri windows (one per opened document).
+`tauri.conf.json` sets `app.withGlobalTauri: true`, which exposes
+`window.__TAURI__.core.invoke` on every webview. Each editor's
+`desk-bridge-bootstrap.ts` (imported first in the editor's `main.tsx`)
+defines a typed `window.__deskApp__` that calls those `invoke()`s
+directly. There is no postMessage hop in the normal flow.
+
+```
+[Editor window]
+   bootstrap defines window.__deskApp__ from ?desk=1 + ?file=…
+       │
+       ▼
+   App.tsx  useEffect:
+       const bridge = window.__deskApp__;
+       if (bridge?.isDesktop) bridge.loadDocument()
+                              → invoke('load_document', { path })
+                              → Rust std::fs::read
+                              → bytes
+       handleSave / handleSaveAs:
+                              → bridge.save(buffer) | bridge.saveAs(name, buffer)
+                              → invoke('save_document' | 'save_document_as', …)
+                              → Rust std::fs::write
 ```
 
-### Reply (parent → iframe)
-```ts
-{ src: 'deskApp',
-  kind: 'reply',
-  id: number,                         // echoes request id
-  result?: unknown,
-  error?: string }
-```
+The postMessage-based iframe path that older docs described is no longer
+used in the runtime; the bootstrap still contains it for symmetry but it
+only fires when the editor is loaded under an iframe parent (the launcher
+no longer does that).
 
-## Editor entry-points we own
+## Editor entry-points we own (in the upstream repos, gated on `?desk=1`)
 
-Only the demo entry points of each upstream editor were touched to wire the
-bridge — the editor packages themselves are unmodified.
+These are the *only* edits we make in `docx/` and `sheets/`. Everything
+else there is upstream code.
 
 | File | Change |
 |---|---|
-| `docx/docx-editor/examples/vite/src/main.tsx` | Added `import './desk-bridge-bootstrap';` as first import |
+| `docx/docx-editor/examples/vite/src/main.tsx` | `import './desk-bridge-bootstrap';` as the first line |
 | `docx/docx-editor/examples/vite/src/desk-bridge-bootstrap.ts` | New file — defines `window.__deskApp__` |
-| `docx/docx-editor/examples/vite/src/App.tsx` | `useEffect` reads bridge.filePath and loads; `handleSave` / `handleSaveAs` route through bridge |
-| `sheets/apps/web/src/main.tsx` | Added `import './desk-bridge-bootstrap';` as first import |
-| `sheets/apps/web/src/desk-bridge-bootstrap.ts` | New file — mirror of docx, plus a visible-error overlay for runtime errors |
-| `sheets/apps/web/src/App.tsx` | `useEffect` calls bridge.loadDocument → xlsxToWorkbookData → replaceWorkbook |
+| `docx/docx-editor/examples/vite/src/App.tsx` | Initial-load `useEffect` reads `bridge.filePath` and calls `loadDocument`; `handleSave` / `handleSaveAs` route through the bridge when `bridge?.isDesktop` |
+| `sheets/apps/web/src/main.tsx` | Same first-import line |
+| `sheets/apps/web/src/desk-bridge-bootstrap.ts` | New file — mirror of docx, plus a red error-overlay that pins runtime errors to the top of the iframe |
+| `sheets/apps/web/src/App.tsx` | `useEffect` calls `bridge.loadDocument` → format-specific parser (xlsx / ods / csv / tsv) → `replaceWorkbook`; `replaceWorkbook` skips its 2-macrotask `snapshotRef` GC when `window.__deskApp__?.isDesktop` (was racing React 18 concurrent rendering and producing a blank canvas) |
 
 These changes are additive and gated on `?desk=1` in the URL — the editors
 still work as web apps when served from their original deploy hosts.

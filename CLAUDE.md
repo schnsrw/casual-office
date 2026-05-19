@@ -20,15 +20,26 @@ dependencies versioned separately.
 
 ## Architecture (locked)
 
-- **Single window** with Chrome-style tabs. One tab = one document.
-- **Tabs are iframes** loading the editor's built `dist/` from
-  `apps/shell/public/{docx,sheets}/index.html?desk=1&file=…`.
-- **No multi-window-per-doc by default.** Drag-out-tab spawns a new Tauri
-  window with the same file path; the original window keeps its other tabs.
-- **The Rust core is stateless** beyond per-user JSON (`~/.config/live.schnsrw.casualoffice/{profile,settings,recent}.json`).
-- **Native save bridge** uses postMessage from iframe to launcher to Tauri
-  commands. Popped-out windows are top-level — they use `window.__TAURI__`
-  directly (`withGlobalTauri: true`).
+- **One Tauri window per open document.** Same model as native Excel /
+  Word / LibreOffice — each opened file is its own webview process, its
+  own event loop, isolated from every other window. The earlier
+  iframe-in-shared-process model was abandoned (Univer's canvas race with
+  the launcher's React tree produced a permanent blank canvas under
+  WebKitGTK; documented as the "swap aborted: snapshotRef is empty" bug).
+- **Launcher window** stays open as the home screen — hero + 3 cards
+  (New document / New spreadsheet / Open file) + recent files + Settings
+  panel + first-run wizard.
+- **Open-where dialog** asks the user "this window or new window?" on
+  every open, with a Remember-my-choice checkbox that stores
+  `open_window_preference` in `settings.json`.
+- **Rust core is stateless** beyond per-user JSON
+  (`~/.config/live.schnsrw.casualoffice/{profile,settings,recent}.json`)
+  plus an optional `avatar.<ext>` for the profile picture.
+- **Bridge:** editors load with `?desk=1[&file=…]`; each editor's
+  `desk-bridge-bootstrap.ts` (first import in its `main.tsx`) defines
+  `window.__deskApp__` and calls `window.__TAURI__.core.invoke` directly
+  (top-level Tauri window mode; `withGlobalTauri: true` in
+  `tauri.conf.json`). No postMessage hop in the normal flow.
 
 See `docs/ARCHITECTURE.md` for the full diagram and decisions.
 
@@ -62,11 +73,11 @@ See `docs/ARCHITECTURE.md` for the full diagram and decisions.
   same as Save As, then becomes a path-bound document.
 - **Save As / Export**: always prompts for location.
 
-These rules are implemented in:
-
-- `apps/shell/src/main.ts` → `handleBridgeRequest` (host side)
-- The editors' bootstraps (`docx/docx-editor/examples/vite/src/desk-bridge-bootstrap.ts`,
-  `sheets/apps/web/src/desk-bridge-bootstrap.ts`) (iframe side)
+These rules are implemented in each editor's `desk-bridge-bootstrap.ts`
+(`docx/docx-editor/examples/vite/src/` and `sheets/apps/web/src/`). The
+bootstrap's `save()` delegates to `saveAs()` when `filePath` is null; after
+a successful `saveAs`, it updates `filePath` so subsequent `save()` calls
+overwrite the chosen path.
 
 ## Working rules for Claude
 
@@ -94,24 +105,35 @@ These rules are implemented in:
 
 | | |
 |---|---|
-| `apps/shell/index.html` | Launcher chrome: wizard, tab strip, home panel, frames container |
-| `apps/shell/src/main.ts` | Launcher logic: wizard, tabs, drag-drop, postMessage router |
-| `apps/shell/src/styles.css` | Launcher styles, theme tokens, `[hidden] !important` |
-| `apps/shell/src-tauri/src/lib.rs` | All Tauri commands: load/save/recents/profile/settings, `open_document_window` for pop-outs |
-| `apps/shell/src-tauri/tauri.conf.json` | Window config, `withGlobalTauri`, bundle config |
+| `apps/shell/index.html` | Wizard + workspace home + Settings panel + open-where modal |
+| `apps/shell/src/main.ts` | Launcher logic: wizard, settings, open-where dialog, recents, drag-drop |
+| `apps/shell/src/styles.css` | Theme tokens, hero/cards/settings/modal styles, `[hidden] !important` |
+| `apps/shell/src-tauri/src/lib.rs` | All Tauri commands (load/save/recents/profile/settings/avatar/`open_document_window`) |
+| `apps/shell/src-tauri/Cargo.toml` | `tauri = { features = ["devtools"] }` — right-click → Inspect works in release builds |
+| `apps/shell/src-tauri/tauri.conf.json` | Window config, `withGlobalTauri: true`, `fileAssociations` for OS default-app registration |
 | `apps/shell/src-tauri/capabilities/default.json` | IPC permission set |
 | `apps/shell/public/docx/`, `public/sheets/` | Built editor dists copied by `scripts/copy-editors.sh` (gitignored) |
-| `docx/docx-editor/examples/vite/src/desk-bridge-bootstrap.ts` | docx-side iframe bootstrap (postMessage + top-level Tauri modes) |
+| `docx/docx-editor/examples/vite/src/desk-bridge-bootstrap.ts` | docx-side bootstrap (top-level Tauri mode; iframe mode kept for symmetry) |
 | `sheets/apps/web/src/desk-bridge-bootstrap.ts` | sheets-side bootstrap (mirror of docx) |
 
-## Status (2026-05-18)
+## Status (2026-05-19)
 
-- Linux build green; launcher + wizard + tabs + drag-out + recent files all
-  working.
-- docx editor renders, opens files, saves natively via the bridge.
-- sheets editor renders the chrome; xlsx file loading via the bridge wired
-  but the file-open path is currently being debugged (visible error overlay
-  added in the bootstrap to surface failures).
-- Windows + macOS targets not yet built (Tauri 2 cross-OS should work; CI
-  matrix is the deferred work).
-- No drag-tab-in-to-merge yet — drag-out only.
+- Linux release binary green, 16 MB. Launcher window with wizard, home
+  screen, recent files, Settings panel, open-where dialog all wired.
+- docx editor renders and saves natively.
+- sheets editor renders and saves natively. The earlier "blank canvas" was
+  fixed by gating sheets' aggressive `snapshotRef` GC on
+  `window.__deskApp__?.isDesktop` — React 18 concurrent rendering can
+  defer the swap effect past the 2-macrotask `setTimeout(0)` clear, so the
+  swap finds an empty ref. The web build keeps its original GC.
+- One Tauri window per document (no tabs, no iframes). Launcher window
+  stays open as the home base.
+- File associations declared in `tauri.conf.json` for `.docx`/`.xlsx`/
+  `.xlsm` — once installed via `.deb` / `.AppImage`, the OS offers Casual
+  Office as an opener.
+- DevTools enabled in release (`tauri = { features = ["devtools"] }`).
+  Right-click any window → Inspect Element.
+- Windows + macOS targets not yet built — Tauri 2 cross-OS should work;
+  CI matrix is deferred work.
+- ODT support deferred until the docx fork gains an OpenDocument Text
+  parser.
