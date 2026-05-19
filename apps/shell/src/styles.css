@@ -764,6 +764,70 @@ em.muted { color: var(--muted); font-style: normal; font-size: 11px; }
   outline-offset: 2px;
 }
 
+/* =============================================================================
+ * Boot skeleton — covers the ~300 ms before is_first_run / get_settings
+ * resolve so the user doesn't see a flash of empty body.
+ * ========================================================================== */
+.boot-skeleton {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: var(--bg);
+  z-index: 50;
+}
+.boot-skeleton .brand-dot {
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+.boot-label {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--muted);
+}
+@keyframes pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+/* =============================================================================
+ * Right-click context menu (used by the recent-files list)
+ * ========================================================================== */
+.context-menu {
+  position: fixed;
+  z-index: 1500;
+  min-width: 200px;
+  padding: 4px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow-2);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  animation: fadein 100ms ease both;
+}
+.context-menu-item {
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: var(--fg);
+  text-align: left;
+  font-size: 13px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.context-menu-item:hover, .context-menu-item:focus-visible {
+  background: var(--tile);
+  outline: none;
+}
+
 /* Slightly bolder card icons for the two "create" actions and a subtle
    differentiator on "Open file" so it reads as a distinct verb. */
 .card-open { border-style: dashed; }

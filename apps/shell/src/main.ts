@@ -281,10 +281,99 @@ async function refreshRecents() {
       li.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') onClick();
       });
+      li.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        openRecentContextMenu(f, e.clientX, e.clientY);
+      });
       recentList.appendChild(li);
     }
   } catch (err) {
     console.error('refreshRecents failed', err);
+  }
+}
+
+/**
+ * Show a context menu for a recent-file entry. Pinned to the click
+ * coordinates; first item is focused so Enter activates the primary
+ * action; Esc or click-outside dismisses.
+ */
+function openRecentContextMenu(f: RecentFile, x: number, y: number) {
+  closeAnyContextMenu();
+  const menu = document.createElement('div');
+  menu.className = 'context-menu';
+  menu.setAttribute('role', 'menu');
+  const items: Array<{ label: string; run: () => void; primary?: boolean }> = [
+    { label: 'Open', run: () => openRecent(f), primary: true },
+    {
+      label: 'Open in new window',
+      run: () => {
+        invoke('add_recent_file', { path: f.path }).catch(() => undefined);
+        invoke('open_document_window', { kind: f.kind, filePath: f.path })
+          .then(() => toast(`Opened ${basename(f.path)}`, 'success'))
+          .catch((err) => toast(`Could not open: ${err}`, 'error', 4500));
+      },
+    },
+    {
+      label: 'Remove from recents',
+      run: async () => {
+        try {
+          await invoke('remove_recent_file', { path: f.path });
+        } catch {
+          /* best-effort */
+        }
+        await refreshRecents();
+      },
+    },
+  ];
+  for (const item of items) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'context-menu-item';
+    btn.setAttribute('role', 'menuitem');
+    btn.textContent = item.label;
+    btn.addEventListener('click', () => {
+      item.run();
+      closeAnyContextMenu();
+    });
+    menu.appendChild(btn);
+  }
+  document.body.appendChild(menu);
+  // Position: clamp inside the viewport.
+  const r = menu.getBoundingClientRect();
+  const maxLeft = window.innerWidth - r.width - 8;
+  const maxTop = window.innerHeight - r.height - 8;
+  menu.style.left = `${Math.min(x, maxLeft)}px`;
+  menu.style.top = `${Math.min(y, maxTop)}px`;
+  // Focus the first menu item so Enter activates the primary action.
+  setTimeout(() => menu.querySelector<HTMLButtonElement>('.context-menu-item')?.focus(), 0);
+
+  const dismiss = (e?: Event) => {
+    if (e && menu.contains(e.target as Node)) return;
+    closeAnyContextMenu();
+  };
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeAnyContextMenu();
+    }
+  };
+  // Defer the global listeners by one frame so the contextmenu event that
+  // opened us doesn't immediately close it.
+  setTimeout(() => {
+    window.addEventListener('mousedown', dismiss);
+    window.addEventListener('keydown', onKey);
+  }, 0);
+  // Stash cleanup on the element so closeAnyContextMenu can run it.
+  (menu as HTMLElement & { __cleanup?: () => void }).__cleanup = () => {
+    window.removeEventListener('mousedown', dismiss);
+    window.removeEventListener('keydown', onKey);
+    menu.remove();
+  };
+}
+
+function closeAnyContextMenu() {
+  for (const el of document.querySelectorAll<HTMLElement>('.context-menu')) {
+    (el as HTMLElement & { __cleanup?: () => void }).__cleanup?.();
   }
 }
 
@@ -747,6 +836,7 @@ async function renderAvatar(el: HTMLElement, profile: Profile) {
 function showSettings() {
   $('home-panel').hidden = true;
   $('settings-panel').hidden = false;
+  $('user-chip').setAttribute('aria-pressed', 'true');
   populateSettings();
   // Escape returns to home.
   window.addEventListener('keydown', settingsEscape);
@@ -755,6 +845,7 @@ function showSettings() {
 function hideSettings() {
   $('settings-panel').hidden = true;
   $('home-panel').hidden = false;
+  $('user-chip').setAttribute('aria-pressed', 'false');
   $('settings-error').textContent = '';
   window.removeEventListener('keydown', settingsEscape);
 }
@@ -877,6 +968,11 @@ function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
   ]);
 }
 
+function hideBootSkeleton() {
+  const sk = document.getElementById('boot-skeleton');
+  if (sk) sk.hidden = true;
+}
+
 async function boot() {
   populateTimezoneDatalist();
   bindWizard();
@@ -897,6 +993,7 @@ async function boot() {
     );
     state.settings = s;
     applyTheme(s.theme);
+    hideBootSkeleton();
     $('wizard').hidden = false;
     showWizardStep(1);
     $<HTMLInputElement>('wiz-name').focus();
@@ -912,6 +1009,7 @@ async function boot() {
   state.profile = profile;
   state.settings = settings;
   applyTheme(settings.theme);
+  hideBootSkeleton();
   if (profile) {
     revealWorkspace();
   } else {
@@ -922,6 +1020,7 @@ async function boot() {
 
 boot().catch((err) => {
   console.error('boot failed', err);
+  hideBootSkeleton();
   // Show the wizard even on catastrophic failure so the user has somewhere
   // to start; the wizard's save_profile call will surface the real error.
   $('wizard').hidden = false;

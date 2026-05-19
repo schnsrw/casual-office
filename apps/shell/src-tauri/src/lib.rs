@@ -400,6 +400,19 @@ async fn pick_avatar_image(app: AppHandle) -> Result<Option<String>, String> {
     let Some(src) = chosen else {
         return Ok(None);
     };
+    // Cap avatar size at 5 MB. Anything larger is almost always the user
+    // mistakenly picking a full-resolution photo; we read the file into JS
+    // as a base64 data URL, and oversized images make that path very slow
+    // (and bloat the data: URL cache).
+    const MAX_AVATAR_BYTES: u64 = 5 * 1024 * 1024;
+    if let Ok(meta) = std::fs::metadata(&src) {
+        if meta.len() > MAX_AVATAR_BYTES {
+            let mb = meta.len() as f64 / (1024.0 * 1024.0);
+            return Err(format!(
+                "Picture is too large ({mb:.1} MB). Pick an image under 5 MB."
+            ));
+        }
+    }
     let ext = src
         .extension()
         .and_then(|s| s.to_str())

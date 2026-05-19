@@ -7,6 +7,13 @@
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
   <body>
+    <!-- Boot skeleton: shown while is_first_run / get_settings resolve.
+         Removed once the wizard or workspace view is ready. -->
+    <div id="boot-skeleton" class="boot-skeleton">
+      <span class="brand-dot" aria-hidden="true"></span>
+      <span class="boot-label">Casual Office</span>
+    </div>
+
     <!-- WIZARD: first-run only ------------------------------------------- -->
     <div id="wizard" class="view wizard" hidden>
       <div class="wiz-card">
