@@ -114,6 +114,31 @@ function setStatus(msg: string) {
 }
 
 // =============================================================================
+// Toast — bottom-right transient notification. Auto-dismisses.
+// =============================================================================
+
+type ToastKind = 'default' | 'success' | 'error';
+
+function toast(message: string, kind: ToastKind = 'default', durationMs = 3000) {
+  const container = document.getElementById('toasts');
+  if (!container) return;
+  const el = document.createElement('div');
+  el.className = `toast${kind === 'default' ? '' : ` ${kind}`}`;
+  el.textContent = message;
+  container.appendChild(el);
+  const dismiss = () => {
+    el.classList.add('leaving');
+    el.addEventListener(
+      'animationend',
+      () => el.remove(),
+      { once: true },
+    );
+  };
+  setTimeout(dismiss, durationMs);
+  el.addEventListener('click', dismiss);
+}
+
+// =============================================================================
 // Bridge: each editor iframe talks to the host via postMessage. The editor
 // inside the iframe sets up its own `window.__deskApp__` from its bootstrap
 // module — this avoids the load-event race where iframe-injected globals
@@ -451,14 +476,19 @@ function doOpen(kind: DocKind, filePath: string | null, where: 'same' | 'new') {
     window.location.href = `${kind}/index.html?${params.toString()}`;
     return;
   }
+  const label = filePath
+    ? filePath.split(/[\\/]/).pop()
+    : kind === 'docx'
+      ? 'New document'
+      : 'New spreadsheet';
   invoke('open_document_window', { kind, filePath })
     .then(() => {
       refreshRecents();
-      setStatus('');
+      toast(`Opened ${label}`, 'success');
     })
     .catch((err) => {
       console.error('open_document_window failed', err);
-      setStatus(`Could not open: ${err}`);
+      toast(`Could not open: ${err}`, 'error', 5000);
     });
 }
 
@@ -470,12 +500,18 @@ function askOpenChoice(kind: DocKind, filePath: string | null) {
   sub.textContent = label ? `Open “${label}” in:` : 'Open in:';
   remember.checked = false;
   modal.hidden = false;
+  // Default focus on the primary action so Enter activates it.
+  setTimeout(() => $<HTMLButtonElement>('open-choice-same').focus(), 0);
 
+  const sameBtn = $<HTMLButtonElement>('open-choice-same');
+  const newBtn = $<HTMLButtonElement>('open-choice-new');
+  const cancelBtn = $<HTMLButtonElement>('open-choice-cancel');
   const cleanup = () => {
     modal.hidden = true;
     sameBtn.removeEventListener('click', onSame);
     newBtn.removeEventListener('click', onNew);
     cancelBtn.removeEventListener('click', onCancel);
+    window.removeEventListener('keydown', onKey);
   };
   const persistIfRemembered = (choice: 'same' | 'new') => {
     if (remember.checked) {
@@ -484,9 +520,6 @@ function askOpenChoice(kind: DocKind, filePath: string | null) {
       invoke('save_settings', { settings: next }).catch(() => undefined);
     }
   };
-  const sameBtn = $<HTMLButtonElement>('open-choice-same');
-  const newBtn = $<HTMLButtonElement>('open-choice-new');
-  const cancelBtn = $<HTMLButtonElement>('open-choice-cancel');
   const onSame = () => {
     persistIfRemembered('same');
     cleanup();
@@ -498,9 +531,16 @@ function askOpenChoice(kind: DocKind, filePath: string | null) {
     doOpen(kind, filePath, 'new');
   };
   const onCancel = () => cleanup();
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      cleanup();
+    }
+  };
   sameBtn.addEventListener('click', onSame);
   newBtn.addEventListener('click', onNew);
   cancelBtn.addEventListener('click', onCancel);
+  window.addEventListener('keydown', onKey);
 }
 
 // =============================================================================
@@ -573,6 +613,7 @@ function bindHomePanel() {
   $('clear-recents').addEventListener('click', async () => {
     await invoke('clear_recent_files');
     await refreshRecents();
+    toast('Recent files cleared');
   });
 }
 
@@ -616,10 +657,28 @@ async function bindDragDrop() {
 function bindShortcuts() {
   window.addEventListener('keydown', (e) => {
     const meta = e.ctrlKey || e.metaKey;
-    // Ctrl/Cmd-O — quick "Open file…" from the launcher.
-    if (meta && e.key.toLowerCase() === 'o') {
+    if (!meta) return;
+    const key = e.key.toLowerCase();
+    // Ctrl/Cmd-O — Open file dialog
+    if (key === 'o' && !e.shiftKey) {
       e.preventDefault();
       $('open-file').click();
+    }
+    // Ctrl/Cmd-N — New document (.docx)
+    if (key === 'n' && !e.shiftKey) {
+      e.preventDefault();
+      $('new-docx').click();
+    }
+    // Ctrl/Cmd-Shift-N — New spreadsheet (.xlsx)
+    if (key === 'n' && e.shiftKey) {
+      e.preventDefault();
+      $('new-sheets').click();
+    }
+    // Ctrl/Cmd-, — Settings (industry standard)
+    if (key === ',') {
+      e.preventDefault();
+      if ($('settings-panel').hidden) showSettings();
+      else hideSettings();
     }
   });
 }
@@ -818,12 +877,22 @@ function showSettings() {
   $('home-panel').hidden = true;
   $('settings-panel').hidden = false;
   populateSettings();
+  // Escape returns to home.
+  window.addEventListener('keydown', settingsEscape);
 }
 
 function hideSettings() {
   $('settings-panel').hidden = true;
   $('home-panel').hidden = false;
   $('settings-error').textContent = '';
+  window.removeEventListener('keydown', settingsEscape);
+}
+
+function settingsEscape(e: KeyboardEvent) {
+  if (e.key === 'Escape' && !$('settings-panel').hidden) {
+    e.preventDefault();
+    hideSettings();
+  }
 }
 
 function populateSettings() {
@@ -851,6 +920,7 @@ function bindSettings() {
       avatarDataUrlCache.delete(newPath);
       await renderAvatar($('settings-avatar'), state.profile);
       await renderAvatar($('user-avatar'), state.profile);
+      toast('Profile picture updated', 'success');
     } catch (err) {
       $('settings-error').textContent = `Could not set picture: ${err}`;
     }
@@ -863,6 +933,7 @@ function bindSettings() {
       state.profile = await invoke<Profile>('save_profile', { profile: next });
       await renderAvatar($('settings-avatar'), state.profile);
       await renderAvatar($('user-avatar'), state.profile);
+      toast('Profile picture removed', 'success');
     } catch (err) {
       $('settings-error').textContent = `Could not remove picture: ${err}`;
     }
@@ -898,6 +969,10 @@ function bindSettings() {
       theme,
       default_save_dir: dir,
     };
+    const saveBtn = $<HTMLButtonElement>('settings-save');
+    const originalLabel = saveBtn.textContent ?? 'Save changes';
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving…';
     try {
       state.profile = await invoke<Profile>('save_profile', { profile: updatedProfile });
       state.settings = await invoke<Settings>('save_settings', { settings: updatedSettings });
@@ -906,8 +981,12 @@ function bindSettings() {
       const chipName = document.getElementById('user-chip-name');
       if (chipName) chipName.textContent = state.profile.name.split(/\s+/)[0];
       hideSettings();
+      toast('Settings saved', 'success');
     } catch (err) {
       $('settings-error').textContent = `Could not save: ${err}`;
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = originalLabel;
     }
   });
 }

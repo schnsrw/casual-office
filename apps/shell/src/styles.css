@@ -612,3 +612,103 @@ em.muted { color: var(--muted); font-style: normal; font-size: 11px; }
   from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: none; }
 }
+
+/* =============================================================================
+ * Toasts — bottom-right, auto-dismissing
+ * ========================================================================== */
+.toasts {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 2000;
+  pointer-events: none;
+  max-width: 360px;
+}
+.toast {
+  background: var(--fg);
+  color: var(--bg);
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.25);
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  animation: toast-in 200ms ease both;
+}
+.toast.success { background: #16a34a; color: #fff; }
+.toast.error { background: #dc2626; color: #fff; }
+.toast.leaving { animation: toast-out 180ms ease both; }
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes toast-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(8px); }
+}
+
+/* =============================================================================
+ * Refinements
+ * ========================================================================== */
+.settings-error {
+  margin: 0;
+  font-size: 12px;
+  color: #dc2626;
+  min-height: 1.2em;
+}
+.spacer { flex: 1; }
+.modal-hint {
+  margin: 10px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: right;
+}
+.modal-actions {
+  margin-top: 18px;
+  align-items: center;
+}
+.modal-actions .link { padding: 8px 6px; }
+
+.settings-about p.about-line {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.settings-about p.muted { color: var(--muted); }
+
+/* Slightly bolder card icons for the two "create" actions and a subtle
+   differentiator on "Open file" so it reads as a distinct verb. */
+.card-open { border-style: dashed; }
+.card-open:hover { border-style: solid; }
+
+/* Keyboard-shortcut hints under the recent list. Subtle, like the
+   shortcut row at the bottom of macOS Spotlight or VS Code's command
+   palette. */
+.kbd-hints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 14px 4px 0;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 8px;
+}
+.kbd-hints span { display: inline-flex; align-items: center; gap: 6px; }
+kbd {
+  display: inline-block;
+  padding: 1px 6px;
+  background: var(--tile);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font: 600 10.5px ui-monospace, SFMono-Regular, 'JetBrains Mono', Menlo, monospace;
+  color: var(--fg);
+  line-height: 1.4;
+  vertical-align: 1px;
+}

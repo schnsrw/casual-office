@@ -157,8 +157,16 @@
             </div>
           </section>
 
+          <section class="settings-section settings-about">
+            <h2>About</h2>
+            <p class="about-line"><strong>Casual Office</strong></p>
+            <p class="about-line muted">A local-only editor for Word and Excel documents.</p>
+            <p class="about-line muted">Files never leave your machine.</p>
+          </section>
+
           <div class="settings-actions">
-            <p id="settings-error" class="hint" style="color:#dc2626;"></p>
+            <p id="settings-error" class="settings-error"></p>
+            <span class="spacer"></span>
             <button id="settings-save" type="button">Save changes</button>
           </div>
         </div>
@@ -227,7 +235,14 @@
             <p class="hint">You can also drag a <code>.docx</code> or <code>.xlsx</code> onto this window.</p>
           </section>
 
-          <footer id="status" class="status"></footer>
+          <div class="kbd-hints" aria-label="Keyboard shortcuts">
+            <span><kbd>Ctrl</kbd>+<kbd>N</kbd> New doc</span>
+            <span><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd> New sheet</span>
+            <span><kbd>Ctrl</kbd>+<kbd>O</kbd> Open</span>
+            <span><kbd>Ctrl</kbd>+<kbd>,</kbd> Settings</span>
+          </div>
+
+          <footer id="status" class="status" aria-live="polite"></footer>
         </div>
       </section>
     </div>
@@ -237,17 +252,22 @@
       <div class="modal" role="dialog" aria-modal="true" aria-labelledby="open-choice-title">
         <h2 id="open-choice-title">Open where?</h2>
         <p class="sub" id="open-choice-sub">Choose how to open this document.</p>
-        <div class="modal-actions">
-          <button id="open-choice-same" type="button">This window</button>
-          <button id="open-choice-new" class="secondary" type="button">New window</button>
-        </div>
         <label class="modal-remember">
           <input id="open-choice-remember" type="checkbox" />
-          <span>Remember my choice</span>
+          <span>Don't ask again — always open this way</span>
         </label>
-        <button id="open-choice-cancel" class="link" type="button">Cancel</button>
+        <div class="modal-actions">
+          <button id="open-choice-cancel" class="link" type="button">Cancel</button>
+          <span class="spacer"></span>
+          <button id="open-choice-new" class="secondary" type="button">New window</button>
+          <button id="open-choice-same" type="button" autofocus>This window</button>
+        </div>
+        <p class="modal-hint">Esc to cancel · Enter to use this window</p>
       </div>
     </div>
+
+    <!-- Toasts: bottom-right transient feedback -->
+    <div id="toasts" class="toasts" aria-live="polite" aria-atomic="false"></div>
 
     <script type="module" src="/src/main.ts"></script>
   </body>
