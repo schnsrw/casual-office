@@ -1071,6 +1071,32 @@ function bindSettings() {
     $<HTMLInputElement>('settings-dir').value = '';
   });
 
+  $('settings-rerun-wizard').addEventListener('click', async () => {
+    if (!confirm('Reset your profile and re-run the setup wizard?\n\nYour recent files and theme will be kept; only your name, email, timezone, and profile picture will be cleared.')) {
+      return;
+    }
+    try {
+      await invoke('reset_profile');
+      state.profile = null;
+      hideSettings();
+      $('workspace').hidden = true;
+      $('wizard').hidden = false;
+      showWizardStep(1);
+      // Prefill the wizard with the previous values so the user can
+      // tweak rather than retype everything. wiz.name remains from any
+      // earlier wizard run; clear so the field is empty for retype.
+      wiz.name = '';
+      wiz.email = '';
+      wiz.timezone = detectTimezone();
+      $<HTMLInputElement>('wiz-name').value = '';
+      $<HTMLInputElement>('wiz-email').value = '';
+      $<HTMLInputElement>('wiz-tz').value = wiz.timezone;
+      $<HTMLInputElement>('wiz-name').focus();
+    } catch (err) {
+      $('settings-error').textContent = `Could not reset: ${err}`;
+    }
+  });
+
   $('settings-save').addEventListener('click', async () => {
     if (!state.profile) return;
     $('settings-error').textContent = '';

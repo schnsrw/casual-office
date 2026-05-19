@@ -857,6 +857,9 @@ em.muted { color: var(--muted); font-style: normal; font-size: 11px; }
   line-height: 1.5;
 }
 .settings-about p.muted { color: var(--muted); }
+.settings-about-actions {
+  margin-top: 10px;
+}
 .version-tag {
   display: inline-block;
   padding: 1px 6px;

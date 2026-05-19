@@ -369,6 +369,77 @@ async fn save_document(path: String, bytes: Vec<u8>) -> Result<(), String> {
     std::fs::write(&path, &bytes).map_err(|e| format!("write {path}: {e}"))
 }
 
+/// Truncate (or create) the file at `path`. First step of a chunked
+/// save — the editor then calls write_save_chunk in a loop. Same
+/// motivation as the chunked load: stays under the JSON-array IPC
+/// truncation threshold for very large files.
+#[tauri::command]
+fn begin_save_document(path: String) -> Result<(), String> {
+    std::fs::File::create(&path)
+        .map(|_| ())
+        .map_err(|e| format!("create {path}: {e}"))
+}
+
+/// Write a slice of the in-progress file. begin_save_document must run
+/// first to truncate / create.
+#[tauri::command]
+fn write_save_chunk(path: String, offset: u64, bytes: Vec<u8>) -> Result<(), String> {
+    use std::io::{Seek, SeekFrom, Write};
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .map_err(|e| format!("open {path}: {e}"))?;
+    f.seek(SeekFrom::Start(offset))
+        .map_err(|e| format!("seek {path}@{offset}: {e}"))?;
+    f.write_all(&bytes)
+        .map_err(|e| format!("write {path}: {e}"))?;
+    Ok(())
+}
+
+/// Show a Save As dialog and return the picked path without writing
+/// anything. The editor then chunks bytes into write_save_chunk calls.
+/// Returns Ok(None) if the user cancels.
+#[tauri::command]
+async fn pick_save_path(
+    app: AppHandle,
+    suggested_name: String,
+) -> Result<Option<String>, String> {
+    let (tx, rx) = std::sync::mpsc::channel::<Option<PathBuf>>();
+    app.dialog()
+        .file()
+        .set_file_name(&suggested_name)
+        .save_file(move |p| {
+            let _ = tx.send(p.and_then(|fp| fp.into_path().ok()));
+        });
+    let chosen = rx.recv().map_err(|e| e.to_string())?;
+    Ok(chosen.map(|p| p.to_string_lossy().to_string()))
+}
+
+/// Wipe the profile file so the next launcher boot routes back into
+/// the first-run wizard. Called from the launcher's Settings panel.
+#[tauri::command]
+fn reset_profile(app: AppHandle) -> Result<(), String> {
+    let path = profile_path(&app)?;
+    if path.exists() {
+        std::fs::remove_file(&path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Bring the launcher window (label "main") to the foreground. Called
+/// by the in-editor Ctrl/Cmd-H shortcut so the user can pivot back to
+/// the home view without alt-tabbing through the document list.
+#[tauri::command]
+fn focus_launcher_window(app: AppHandle) -> Result<(), String> {
+    let Some(w) = app.get_webview_window("main") else {
+        return Err("launcher window is not open".into());
+    };
+    let _ = w.show();
+    let _ = w.unminimize();
+    let _ = w.set_focus();
+    Ok(())
+}
+
 #[tauri::command]
 async fn save_document_as(
     app: AppHandle,
@@ -694,6 +765,11 @@ pub fn run() {
             reveal_in_folder,
             save_document,
             save_document_as,
+            begin_save_document,
+            write_save_chunk,
+            pick_save_path,
+            reset_profile,
+            focus_launcher_window,
             is_first_run,
             get_profile,
             save_profile,
