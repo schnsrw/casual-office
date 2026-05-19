@@ -30,6 +30,8 @@
   "bundle": {
     "active": true,
     "category": "Productivity",
+    "shortDescription": "Casual Office — local Word & Excel editor",
+    "longDescription": "Casual Office is a local-only desktop editor for Word (.docx) and Excel (.xlsx, .ods, .csv, .tsv) documents. Files never leave your machine.",
     "targets": ["deb", "appimage"],
     "icon": [
       "icons/32x32.png",
@@ -51,7 +53,33 @@
         "description": "Microsoft Excel workbook",
         "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "role": "Editor"
+      },
+      {
+        "ext": ["ods"],
+        "name": "OpenDocument Spreadsheet",
+        "description": "OpenDocument spreadsheet",
+        "mimeType": "application/vnd.oasis.opendocument.spreadsheet",
+        "role": "Editor"
+      },
+      {
+        "ext": ["csv"],
+        "name": "Comma-separated values",
+        "description": "Comma-separated values",
+        "mimeType": "text/csv",
+        "role": "Editor"
+      },
+      {
+        "ext": ["tsv", "tab"],
+        "name": "Tab-separated values",
+        "description": "Tab-separated values",
+        "mimeType": "text/tab-separated-values",
+        "role": "Editor"
       }
-    ]
+    ],
+    "linux": {
+      "deb": {
+        "postInstallScript": "scripts/postinst.sh"
+      }
+    }
   }
 }

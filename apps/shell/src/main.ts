@@ -1,7 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { listen } from '@tauri-apps/api/event';
 
 // =============================================================================
 // Types
@@ -662,37 +661,6 @@ async function bindDragDrop() {
 // Keyboard shortcuts (global; editors handle Ctrl+S inside iframes themselves)
 // =============================================================================
 
-/**
- * Native menu bar items emit a "menu" Tauri event with the item id as
- * payload. Route them to the same handlers our in-page buttons use.
- */
-function bindMenuEvents() {
-  listen<string>('menu', (e) => {
-    const id = e.payload;
-    switch (id) {
-      case 'new-docx':
-        $('new-docx').click();
-        break;
-      case 'new-sheets':
-        $('new-sheets').click();
-        break;
-      case 'open-file':
-        $('open-file').click();
-        break;
-      case 'focus-home':
-        if (!$('settings-panel').hidden) hideSettings();
-        break;
-      case 'open-settings':
-        showSettings();
-        break;
-      default:
-        /* unknown menu id — ignore */
-    }
-  }).catch((err) => {
-    console.warn('menu event binding failed', err);
-  });
-}
-
 function bindShortcuts() {
   window.addEventListener('keydown', (e) => {
     const meta = e.ctrlKey || e.metaKey;
@@ -1191,7 +1159,6 @@ async function boot() {
   bindHomePanel();
   bindSettings();
   bindShortcuts();
-  bindMenuEvents();
   // Drag-drop binding is fire-and-forget; failures shouldn't block boot.
   bindDragDrop();
 

@@ -3,8 +3,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
-use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::DialogExt;
 
 static WINDOW_SEQ: AtomicU32 = AtomicU32::new(0);
@@ -741,27 +740,11 @@ pub fn run() {
             app.manage(RecentsState {
                 list: Mutex::new(initial),
             });
-            // Native menu bar — the biggest single thing that makes a
-            // window stop reading as a webpage on Linux/macOS. Items
-            // emit menu-id events into the launcher webview; the
-            // launcher's JS listens and routes them through the same
-            // handlers the home-screen buttons use.
-            let menu = build_app_menu(&app.handle()).map_err(|e| {
-                eprintln!("menu build failed: {e}");
-                e
-            })?;
-            app.set_menu(menu)?;
-            app.on_menu_event(|app, event| {
-                let id = event.id().0.as_str();
-                // Forward all menu events as a tauri event the launcher's
-                // JS already listens for. The launcher routes by id.
-                let _ = app.emit("menu", id);
-                // Some events we handle directly in Rust because they
-                // don't need to hit the launcher (Quit).
-                if id == "quit" {
-                    app.exit(0);
-                }
-            });
+            // (Earlier prototype attached a native menu bar via
+            // tauri::menu::Menu. Removed — visual treatment didn't fit
+            // the launcher's home-screen layout. Keyboard shortcuts that
+            // the menu provided still work via the in-page bindShortcuts
+            // listener.)
 
             // Initial argv: if the OS launched us via a file association,
             // argv contains the path. Open it in a doc window once the app
@@ -804,66 +787,6 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-}
-
-/// Native menu bar attached to the launcher window. Items emit a "menu"
-/// event with the item id; the launcher's JS routes them to the same
-/// handlers the home-screen buttons use.
-fn build_app_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
-    let new_docx = MenuItem::with_id(app, "new-docx", "New document", true, Some("CmdOrCtrl+N"))?;
-    let new_sheet = MenuItem::with_id(app, "new-sheets", "New spreadsheet", true, Some("CmdOrCtrl+Shift+N"))?;
-    let open = MenuItem::with_id(app, "open-file", "Open file…", true, Some("CmdOrCtrl+O"))?;
-    let home = MenuItem::with_id(app, "focus-home", "Home", true, Some("CmdOrCtrl+H"))?;
-    let settings = MenuItem::with_id(app, "open-settings", "Settings…", true, Some("CmdOrCtrl+,"))?;
-    let quit = MenuItem::with_id(app, "quit", "Quit Casual Office", true, Some("CmdOrCtrl+Q"))?;
-
-    let file_menu = Submenu::with_items(
-        app,
-        "File",
-        true,
-        &[
-            &new_docx,
-            &new_sheet,
-            &open,
-            &PredefinedMenuItem::separator(app)?,
-            &settings,
-            &PredefinedMenuItem::separator(app)?,
-            &quit,
-        ],
-    )?;
-
-    let view_menu = Submenu::with_items(
-        app,
-        "View",
-        true,
-        &[
-            &home,
-            &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::fullscreen(app, None)?,
-        ],
-    )?;
-
-    // Standard Edit menu — picks up native Cut/Copy/Paste/Undo/Redo
-    // shortcuts that just work inside the launcher's inputs.
-    let edit_menu = Submenu::with_items(
-        app,
-        "Edit",
-        true,
-        &[
-            &PredefinedMenuItem::undo(app, None)?,
-            &PredefinedMenuItem::redo(app, None)?,
-            &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::cut(app, None)?,
-            &PredefinedMenuItem::copy(app, None)?,
-            &PredefinedMenuItem::paste(app, None)?,
-            &PredefinedMenuItem::select_all(app, None)?,
-        ],
-    )?;
-
-    let about = MenuItem::with_id(app, "open-settings", "About Casual Office", true, None::<&str>)?;
-    let help_menu = Submenu::with_items(app, "Help", true, &[&about])?;
-
-    Menu::with_items(app, &[&file_menu, &edit_menu, &view_menu, &help_menu])
 }
 
 fn urlencoding_lite(s: &str) -> String {
