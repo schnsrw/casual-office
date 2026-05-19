@@ -277,24 +277,47 @@ async fn open_document_window(
     Ok(title)
 }
 
-/// Read a file's bytes and return them via Tauri's binary IPC channel.
-///
-/// Returning `Vec<u8>` directly is unsafe for files past a few MB: Tauri
-/// serializes it as a JSON array of numbers (`[80, 75, 3, 4, …]`), which
-/// for a 10 MB docx becomes a ~30 MB JSON string. We have observed that
-/// path silently truncating large payloads, which surfaces as JSZip's
-/// "Can't find end of central directory" error in the editor (the EOCD
-/// record is the last 22 bytes of a zip file; if we lose the tail the
-/// whole archive is unparseable).
-///
-/// `tauri::ipc::Response::new(bytes)` instead sends raw octet-stream
-/// bytes to JS, where `invoke` resolves to an `ArrayBuffer`. No
-/// truncation, no JSON cost, and constant memory for the marshaling
-/// step.
+/// Total size of a file. Used by the launcher to compute how many
+/// chunks to ask for.
 #[tauri::command]
-async fn load_document(path: String) -> Result<tauri::ipc::Response, String> {
-    let bytes = std::fs::read(&path).map_err(|e| format!("read {path}: {e}"))?;
-    Ok(tauri::ipc::Response::new(bytes))
+fn document_size(path: String) -> Result<u64, String> {
+    std::fs::metadata(&path)
+        .map(|m| m.len())
+        .map_err(|e| format!("stat {path}: {e}"))
+}
+
+/// Read a slice of a file. The launcher reads documents in 1 MB chunks
+/// so each individual IPC message stays well below any JSON-array
+/// truncation threshold — observed behavior was that returning a 10 MB
+/// Vec<u8> as JSON corrupted the tail, breaking JSZip's EOCD lookup in
+/// the docx editor.
+///
+/// (Tauri 2 has a `tauri::ipc::Response::new(bytes)` API that's
+/// supposed to side-step JSON entirely, but on this Linux/WebKitGTK
+/// build we saw it still fail for large files. Chunked read sidesteps
+/// the question by keeping each payload tiny.)
+#[tauri::command]
+async fn read_document_chunk(
+    path: String,
+    offset: u64,
+    length: u64,
+) -> Result<Vec<u8>, String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(&path).map_err(|e| format!("open {path}: {e}"))?;
+    f.seek(SeekFrom::Start(offset))
+        .map_err(|e| format!("seek {path}@{offset}: {e}"))?;
+    let mut buf = vec![0u8; length as usize];
+    let n = f.read(&mut buf).map_err(|e| format!("read {path}: {e}"))?;
+    buf.truncate(n);
+    Ok(buf)
+}
+
+/// One-shot read kept around for small files and as a debugging hook —
+/// the launcher's normal path is now read_document_chunk in a loop. For
+/// anything past a few MB the JS side will hit the chunked path.
+#[tauri::command]
+async fn load_document(path: String) -> Result<Vec<u8>, String> {
+    std::fs::read(&path).map_err(|e| format!("read {path}: {e}"))
 }
 
 /// Cheap existence check used by the launcher before opening a recent
@@ -665,6 +688,8 @@ pub fn run() {
             remove_recent_file,
             set_recent_pinned,
             load_document,
+            document_size,
+            read_document_chunk,
             file_exists,
             reveal_in_folder,
             save_document,
