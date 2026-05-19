@@ -494,25 +494,79 @@ input[type='text']:focus { border-color: var(--accent); box-shadow: 0 0 0 3px co
 .status { font-size: 12px; color: var(--muted); min-height: 1.2em; }
 
 /* =============================================================================
- * Drop overlay
+ * Drop overlay — only shown during an actual file drag (filtered by paths)
  * ========================================================================== */
 .drop-overlay {
   position: fixed; inset: 0;
   pointer-events: none;
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  backdrop-filter: blur(4px);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
   display: grid;
   place-items: center;
-  z-index: 1000;
+  z-index: 900;
   animation: fadein 120ms ease both;
 }
-.drop-pill {
-  padding: 14px 24px;
-  background: var(--accent);
-  color: white;
-  border-radius: 999px;
-  font-weight: 600;
+.drop-card {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  padding: 28px 36px;
+  background: var(--surface);
+  color: var(--fg);
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-2);
+  min-width: 280px;
+  text-align: center;
+}
+.drop-icon { width: 36px; height: 36px; color: var(--accent); }
+.drop-title { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+.drop-sub { font-size: 12px; color: var(--muted); }
+
+/* =============================================================================
+ * "What's new" modal
+ * ========================================================================== */
+.modal-wide { width: min(520px, 92vw); padding: 28px; }
+.whats-new-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+.whats-new-head .brand-dot {
+  width: 28px; height: 28px;
+  border-radius: 8px;
+}
+.whats-new-head h2 {
+  font-size: 18px;
+  text-transform: none;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+  margin: 0;
+}
+.whats-new-head .sub { margin: 2px 0 0; font-size: 12px; }
+.whats-new-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 8px;
+  display: grid;
+  gap: 10px;
+}
+.whats-new-list li {
+  position: relative;
+  padding-left: 26px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--fg);
+}
+.whats-new-list li::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 7px;
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--docx), var(--sheets));
+  opacity: 0.85;
 }
 
 /* =============================================================================

@@ -27,7 +27,7 @@
           </label>
           <label class="field">
             <span>Time zone</span>
-            <input id="wiz-tz" type="text" autocomplete="off" />
+            <input id="wiz-tz" type="text" autocomplete="off" list="tz-list" placeholder="e.g. America/New_York" />
           </label>
           <p class="hint">Used as author metadata on documents you save. Stored locally; never sent anywhere.</p>
           <div class="wiz-actions">
@@ -120,7 +120,7 @@
             </label>
             <label class="field">
               <span>Time zone</span>
-              <input id="settings-tz" type="text" autocomplete="off" />
+              <input id="settings-tz" type="text" autocomplete="off" list="tz-list" placeholder="e.g. America/New_York" />
             </label>
           </section>
 
@@ -265,6 +265,41 @@
         <p class="modal-hint">Esc to cancel · Enter to use this window</p>
       </div>
     </div>
+
+    <!-- "What's new" modal: shown once after a version bump -->
+    <div id="whats-new" class="modal-backdrop" hidden>
+      <div class="modal modal-wide" role="dialog" aria-modal="true" aria-labelledby="whats-new-title">
+        <div class="whats-new-head">
+          <span class="brand-dot" aria-hidden="true"></span>
+          <div>
+            <h2 id="whats-new-title">What's new</h2>
+            <p class="sub" id="whats-new-version">Casual Office</p>
+          </div>
+        </div>
+        <ul id="whats-new-list" class="whats-new-list"></ul>
+        <div class="modal-actions">
+          <span class="spacer"></span>
+          <button id="whats-new-dismiss" type="button">Got it</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Drag-drop overlay: shown only while an actual supported file is
+         being dragged over the launcher window (filtered by file path). -->
+    <div id="drop-overlay" class="drop-overlay" hidden>
+      <div class="drop-card">
+        <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 3v12"/><path d="M7 8l5-5 5 5"/>
+          <path d="M5 21h14a2 2 0 0 0 2-2v-3"/><path d="M3 16v3a2 2 0 0 0 2 2"/>
+        </svg>
+        <div class="drop-title" id="drop-title">Drop to open</div>
+        <div class="drop-sub" id="drop-sub">.docx · .xlsx · .ods · .csv · .tsv</div>
+      </div>
+    </div>
+
+    <!-- IANA timezone autocomplete shared by the wizard and settings -->
+    <datalist id="tz-list"></datalist>
 
     <!-- Toasts: bottom-right transient feedback -->
     <div id="toasts" class="toasts" aria-live="polite" aria-atomic="false"></div>

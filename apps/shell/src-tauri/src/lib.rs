@@ -257,6 +257,13 @@ struct Settings {
     theme: String,
     /// Default directory shown by the open/save dialogs. None = OS default.
     default_save_dir: Option<String>,
+    /// "ask" | "same" | "new" — drives the open-where modal.
+    #[serde(default)]
+    open_window_preference: Option<String>,
+    /// Version of Casual Office the user last saw the "What's new" screen
+    /// for. None = never seen.
+    #[serde(default)]
+    last_seen_version: Option<String>,
 }
 
 impl Default for Settings {
@@ -264,6 +271,8 @@ impl Default for Settings {
         Self {
             theme: "system".into(),
             default_save_dir: None,
+            open_window_preference: None,
+            last_seen_version: None,
         }
     }
 }
@@ -394,11 +403,85 @@ fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, String>
     Ok(settings)
 }
 
+// --- File-association / single-instance handling --------------------------
+//
+// When the user double-clicks a .docx / .xlsx in the file manager, the OS
+// launches Casual Office with the file path in argv (because of the
+// `fileAssociations` block in tauri.conf.json). If Casual Office is already
+// running, the OS still launches a second process; the
+// `tauri-plugin-single-instance` plugin catches that, hands the second
+// process's argv to the first via callback, and exits the second. Either
+// way we end up opening the file in the running app.
+
+/// Pull the first argv entry that looks like an existing path we support
+/// (.docx, .xlsx, …). Skips argv[0] (the binary path) and any flags.
+fn first_openable_path(args: &[String]) -> Option<String> {
+    for arg in args.iter().skip(1) {
+        if arg.starts_with('-') {
+            continue;
+        }
+        if DocKind::from_path(arg).is_some() {
+            return Some(arg.clone());
+        }
+    }
+    None
+}
+
+/// Open the given file in a new document window. Called from setup() for
+/// the initial argv path and from the single-instance handler for any
+/// subsequent file-manager double-click.
+fn open_file_path(app: &AppHandle, path: String) {
+    let Some(kind) = DocKind::from_path(&path) else {
+        return;
+    };
+    let id = WINDOW_SEQ.fetch_add(1, Ordering::SeqCst);
+    let label = format!("doc-{id}");
+    let title = format!(
+        "{} — {}",
+        kind.title_prefix(),
+        std::path::Path::new(&path)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&path)
+    );
+    let mut url = format!("{}?desk=1&file=", kind.subpath());
+    url.push_str(&urlencoding_lite(&path));
+
+    let _ = WebviewWindowBuilder::new(app, &label, WebviewUrl::App(url.into()))
+        .title(&title)
+        .inner_size(1280.0, 860.0)
+        .min_inner_size(720.0, 480.0)
+        .resizable(true)
+        .build();
+
+    if let Some(state) = app.try_state::<RecentsState>() {
+        touch_recent(app, &state, &path);
+    }
+}
+
+#[tauri::command]
+fn get_app_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
 // --- App entry --------------------------------------------------------------
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // A second `casual-office <file>` invocation arrived (or just
+            // a bare `casual-office` re-launch). Forward any openable file
+            // to the running instance; raise the launcher either way.
+            if let Some(path) = first_openable_path(&args) {
+                open_file_path(app, path);
+            }
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.set_focus();
+                let _ = w.unminimize();
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .setup(|app| {
@@ -406,6 +489,15 @@ pub fn run() {
             app.manage(RecentsState {
                 list: Mutex::new(initial),
             });
+            // Initial argv: if the OS launched us via a file association,
+            // argv contains the path. Open it in a doc window once the app
+            // is up. Done synchronously inside setup() — the app handle is
+            // already valid and WebviewWindowBuilder::build returns
+            // immediately.
+            let args: Vec<String> = std::env::args().collect();
+            if let Some(path) = first_openable_path(&args) {
+                open_file_path(&app.handle(), path);
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -423,6 +515,7 @@ pub fn run() {
             read_avatar_bytes,
             get_settings,
             save_settings,
+            get_app_version,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

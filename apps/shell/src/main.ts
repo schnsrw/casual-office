@@ -30,7 +30,28 @@ interface Settings {
   /** "ask" (show modal every time), "same", "new" — populated by the
    *  "Remember my choice" checkbox in the open-where dialog. */
   open_window_preference?: 'ask' | 'same' | 'new';
+  /** Last app version the user saw the "What's new" modal for. */
+  last_seen_version?: string | null;
 }
+
+/**
+ * Inline release notes, newest first. Shown via the "What's new" modal
+ * on the first launch after the app's CARGO_PKG_VERSION moves past
+ * `settings.last_seen_version`. Keep entries short and concrete.
+ */
+const CHANGELOG: ReadonlyArray<{ version: string; title: string; highlights: string[] }> = [
+  {
+    version: '0.0.0',
+    title: 'Welcome to Casual Office',
+    highlights: [
+      'Edit Word (.docx) and Excel (.xlsx, .ods, .csv, .tsv) files locally — nothing leaves your machine.',
+      'One native window per document — same speed and isolation as Excel or Word.',
+      'Save writes back to the original file; Save As always prompts for a new location.',
+      'Profile + settings with custom picture, theme, and default save folder.',
+      'Set Casual Office as the default app in your OS to open documents directly from the file manager.',
+    ],
+  },
+];
 
 interface Tab {
   id: string;
@@ -627,22 +648,63 @@ function bindTabBar() {
 // =============================================================================
 
 async function bindDragDrop() {
-  // Visual overlay is intentionally not toggled on enter/over/leave — the
-  // WebKitGTK Tauri runtime fires a spurious 'enter' at startup which, with
-  // an overlay at z-index 1000, blanketed the wizard. The drop is still
-  // handled. We'll add visual feedback back once we filter the spurious
-  // event reliably (probably by sniffing payload.paths length on enter).
+  // The WebKitGTK Tauri runtime can fire a spurious 'enter' at startup
+  // with an empty paths array. We filter that out: only show the overlay
+  // when at least one supported file is actually being dragged.
+  let dragActive = false;
+  let hideTimer: ReturnType<typeof setTimeout> | null = null;
+  const overlay = $('drop-overlay');
+  const title = $('drop-title');
+  const sub = $('drop-sub');
+
+  const showOverlay = (supported: string[]) => {
+    if (dragActive) return;
+    dragActive = true;
+    overlay.hidden = false;
+    const n = supported.length;
+    title.textContent = n === 1 ? 'Drop to open' : `Drop to open ${n} files`;
+    sub.textContent = supported
+      .slice(0, 3)
+      .map((p) => p.split(/[\\/]/).pop())
+      .join(' · ');
+    // Safety net: if 'leave'/'drop' never fires (some WMs swallow it),
+    // auto-hide after 4s of no movement.
+    if (hideTimer) clearTimeout(hideTimer);
+    hideTimer = setTimeout(hideOverlay, 4000);
+  };
+  const hideOverlay = () => {
+    dragActive = false;
+    overlay.hidden = true;
+    if (hideTimer) {
+      clearTimeout(hideTimer);
+      hideTimer = null;
+    }
+  };
+
   try {
     await getCurrentWindow().onDragDropEvent(({ payload }) => {
       const t = (payload as { type?: string }).type;
-      if (t !== 'drop') return;
-      // Don't accept drops while the first-run wizard is up — would route
-      // to a launcher tab that doesn't exist yet.
-      if (!$('wizard').hidden) return;
       const paths = (payload as { paths?: string[] }).paths ?? [];
-      for (const p of paths) {
-        const kind = kindFromPath(p);
-        if (kind) openOrReplaceLauncher(kind, p);
+      // Don't accept anything while the first-run wizard is up.
+      if (!$('wizard').hidden) return;
+
+      if (t === 'enter') {
+        const supported = paths.filter((p) => kindFromPath(p));
+        if (supported.length > 0) showOverlay(supported);
+      } else if (t === 'over') {
+        // Keep the overlay alive while we're being hovered.
+        if (dragActive && hideTimer) {
+          clearTimeout(hideTimer);
+          hideTimer = setTimeout(hideOverlay, 4000);
+        }
+      } else if (t === 'leave') {
+        hideOverlay();
+      } else if (t === 'drop') {
+        hideOverlay();
+        for (const p of paths) {
+          const kind = kindFromPath(p);
+          if (kind) openOrReplaceLauncher(kind, p);
+        }
       }
     });
   } catch (err) {
@@ -710,6 +772,42 @@ function detectTimezone(): string {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
   } catch {
     return '';
+  }
+}
+
+/** Full IANA time zone list when the runtime supports it, falling back
+ *  to a hand-picked common subset on older browsers. */
+function supportedTimezones(): string[] {
+  try {
+    // Modern engines (WebKitGTK 2.40+, Chromium 99+, Firefox 93+).
+    const intl = Intl as unknown as { supportedValuesOf?: (key: string) => string[] };
+    if (typeof intl.supportedValuesOf === 'function') {
+      return intl.supportedValuesOf('timeZone');
+    }
+  } catch {
+    /* fall through */
+  }
+  return [
+    'UTC',
+    'America/Los_Angeles', 'America/Denver', 'America/Chicago', 'America/New_York',
+    'America/Toronto', 'America/Mexico_City', 'America/Sao_Paulo',
+    'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Moscow',
+    'Africa/Cairo', 'Africa/Johannesburg',
+    'Asia/Dubai', 'Asia/Karachi', 'Asia/Kolkata', 'Asia/Bangkok',
+    'Asia/Singapore', 'Asia/Shanghai', 'Asia/Tokyo', 'Asia/Seoul',
+    'Australia/Sydney', 'Pacific/Auckland',
+  ];
+}
+
+function populateTimezoneDatalist() {
+  const list = document.getElementById('tz-list');
+  if (!list) return;
+  // Built once on boot; the option set is fixed for the runtime.
+  if (list.children.length > 0) return;
+  for (const tz of supportedTimezones()) {
+    const opt = document.createElement('option');
+    opt.value = tz;
+    list.appendChild(opt);
   }
 }
 
@@ -832,6 +930,78 @@ function revealWorkspace() {
     greet.textContent = `${partOfDay}, ${state.profile.name.split(/\s+/)[0]}`;
   }
   refreshRecents();
+  maybeShowWhatsNew();
+}
+
+// ---------- "What's new" modal --------------------------------------------
+
+async function maybeShowWhatsNew() {
+  let appVersion: string;
+  try {
+    appVersion = await invoke<string>('get_app_version');
+  } catch {
+    return;
+  }
+  // First-run wizard already covered "welcome" — only show this when the
+  // user moves to a NEW version from a SEEN one. Wizard sets
+  // last_seen_version on completion (below) so a fresh install doesn't
+  // double-greet.
+  const lastSeen = state.settings.last_seen_version ?? null;
+  if (lastSeen === appVersion) return;
+  if (lastSeen === null) {
+    // First-ever launch (wizard already ran): just stamp the version and
+    // skip — no changelog to compare against.
+    await markVersionSeen(appVersion);
+    return;
+  }
+
+  // Pick the changelog entry that matches the new version. If there's no
+  // explicit entry, show the most recent one (covers minor bumps that
+  // don't need their own block).
+  const entry = CHANGELOG.find((c) => c.version === appVersion) ?? CHANGELOG[0];
+  showWhatsNew(entry, appVersion);
+}
+
+function showWhatsNew(
+  entry: (typeof CHANGELOG)[number],
+  appVersion: string,
+) {
+  const modal = $('whats-new');
+  $('whats-new-title').textContent = entry.title;
+  $('whats-new-version').textContent = `Casual Office ${appVersion}`;
+  const list = $<HTMLUListElement>('whats-new-list');
+  list.innerHTML = '';
+  for (const h of entry.highlights) {
+    const li = document.createElement('li');
+    li.textContent = h;
+    list.appendChild(li);
+  }
+  modal.hidden = false;
+  setTimeout(() => $<HTMLButtonElement>('whats-new-dismiss').focus(), 0);
+
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === 'Escape' || e.key === 'Enter') {
+      e.preventDefault();
+      dismiss();
+    }
+  };
+  const dismiss = async () => {
+    modal.hidden = true;
+    window.removeEventListener('keydown', onKey);
+    await markVersionSeen(appVersion);
+  };
+  $('whats-new-dismiss').addEventListener('click', dismiss, { once: true });
+  window.addEventListener('keydown', onKey);
+}
+
+async function markVersionSeen(version: string) {
+  const next: Settings = { ...state.settings, last_seen_version: version };
+  state.settings = next;
+  try {
+    await invoke('save_settings', { settings: next });
+  } catch {
+    /* best-effort */
+  }
 }
 
 const avatarDataUrlCache = new Map<string, string>();
@@ -999,6 +1169,7 @@ function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
 }
 
 async function boot() {
+  populateTimezoneDatalist();
   bindWizard();
   bindHomePanel();
   bindSettings();
