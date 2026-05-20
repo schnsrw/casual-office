@@ -32,6 +32,10 @@ interface Settings {
   open_window_preference?: 'ask' | 'same' | 'new';
   /** Last app version the user saw the "What's new" modal for. */
   last_seen_version?: string | null;
+  /** Privacy mode — see Rust-side struct docs. On Linux this is a
+   *  stored preference only; OS-level content protection is not
+   *  available through the compositor. */
+  privacy_mode?: boolean;
 }
 
 /**
@@ -1018,6 +1022,7 @@ function populateSettings() {
   $<HTMLInputElement>('settings-email').value = state.profile.email ?? '';
   $<HTMLInputElement>('settings-tz').value = state.profile.timezone ?? detectTimezone();
   $<HTMLInputElement>('settings-dir').value = state.settings.default_save_dir ?? '';
+  $<HTMLInputElement>('settings-privacy').checked = state.settings.privacy_mode === true;
   for (const radio of document.querySelectorAll<HTMLInputElement>('input[name=settings-theme]')) {
     radio.checked = radio.value === state.settings.theme;
   }
@@ -1118,6 +1123,7 @@ function bindSettings() {
       ...state.settings,
       theme,
       default_save_dir: dir,
+      privacy_mode: $<HTMLInputElement>('settings-privacy').checked,
     };
     const saveBtn = $<HTMLButtonElement>('settings-save');
     const originalLabel = saveBtn.textContent ?? 'Save changes';

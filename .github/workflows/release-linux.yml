@@ -1,0 +1,162 @@
+name: Release Linux
+
+# Build .deb + .AppImage on every push of a v* tag and attach them to
+# a GitHub Release. Run manually too via workflow_dispatch.
+#
+# Cross-repo wiring: the editors live in separate gitignored sibling
+# directories (`docx/`, `sheets/`). The workflow clones them at the
+# `desk_v0.0.0/*` branches the deskApp expects, runs each editor's
+# build, copies the dists into `apps/shell/public/`, then builds the
+# Tauri shell.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag name for the release (e.g. v0.0.1)'
+        required: true
+        default: 'v0.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout deskApp
+        uses: actions/checkout@v4
+
+      - name: Resolve release tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "name=${GITHUB_REF##*/}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install system dependencies
+        # Tauri 2 on Linux needs the WebKitGTK 4.1 dev headers,
+        # GTK build deps, librsvg (icon rasterisation) and
+        # libappindicator/ayatana (system tray). emf2svg is no
+        # longer needed — upstream docx now converts EMF in-browser.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Setup Node + pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/shell/src-tauri/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('apps/shell/src-tauri/Cargo.lock') }}
+
+      - name: Clone docx editor at bridge-wiring branch
+        run: |
+          git clone --depth 1 --branch desk_v0.0.0/bridge-wiring \
+            https://github.com/schnsrw/docx.git docx
+          (cd docx/docx-editor && bun install)
+
+      - name: Clone sheets editor at no-cdn-fonts branch
+        run: |
+          git clone --depth 1 --branch desk_v0.0.0/no-cdn-fonts \
+            https://github.com/schnsrw/sheets.git sheets
+          (cd sheets && pnpm install --frozen-lockfile)
+
+      - name: Build docx editor
+        working-directory: docx/docx-editor/examples/vite
+        run: bun run build
+
+      - name: Build sheets editor
+        working-directory: sheets/apps/web
+        run: pnpm build
+
+      - name: Install shell deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Copy editor dists into shell
+        working-directory: apps/shell
+        run: ./scripts/copy-editors.sh
+
+      - name: Build shell (vite)
+        working-directory: apps/shell
+        run: pnpm build
+
+      - name: Build Tauri bundles
+        working-directory: apps/shell/src-tauri
+        run: cargo tauri build --bundles deb,appimage
+        # tauri-cli expected to be available via `cargo install
+        # tauri-cli` if not already pinned. Fall back to local pnpm
+        # script if cargo binary isn't on PATH.
+
+      - name: Stage artifacts
+        run: |
+          mkdir -p release-artifacts
+          cp "apps/shell/src-tauri/target/release/bundle/deb/"*.deb \
+             release-artifacts/
+          cp "apps/shell/src-tauri/target/release/bundle/appimage/"*.AppImage \
+             release-artifacts/
+          ls -lh release-artifacts/
+
+      - name: Create / update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: ${{ steps.tag.outputs.name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            release-artifacts/*.deb
+            release-artifacts/*.AppImage
+          body: |
+            Casual Office ${{ steps.tag.outputs.name }} — Linux build.
+
+            ## Install (.deb, Debian / Ubuntu)
+            ```sh
+            sudo dpkg -i "Casual Office_*_amd64.deb"
+            ```
+
+            ## Run (.AppImage)
+            ```sh
+            chmod +x Casual\ Office_*_amd64.AppImage
+            ./Casual\ Office_*_amd64.AppImage
+            ```
+
+            Files stay on disk — Casual Office is single-user and
+            local-only. No sync, no account, no telemetry.

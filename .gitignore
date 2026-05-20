@@ -8,6 +8,7 @@ target/
 playwright-report/
 test-results/
 /apps/shell/playwright/.cache/
+/apps/shell/screenshots/
 
 # Upstream editor repos are cloned in-tree but versioned separately
 # (each has its own .git/). Treat as external dependencies.

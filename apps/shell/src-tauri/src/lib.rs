@@ -262,13 +262,21 @@ async fn open_document_window(
     // inside the new window; it defines window.__deskApp__ using either
     // postMessage (iframe — no longer used) or window.__TAURI__.core
     // (top-level window — the case here). No host-side injection needed.
-    WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(url.into()))
+    let window = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(url.into()))
         .title(&title)
         .inner_size(1280.0, 860.0)
         .min_inner_size(720.0, 480.0)
         .resizable(true)
+        .maximized(true)
+        .focused(true)
         .build()
         .map_err(|e| e.to_string())?;
+    let _ = window.show();
+    let _ = window.unminimize();
+    let _ = window.set_focus();
+    if get_settings(app.clone()).privacy_mode {
+        let _ = window.set_content_protected(true);
+    }
 
     if let Some(p) = file_path.as_deref() {
         touch_recent(&app, &state, p);
@@ -502,6 +510,15 @@ struct Settings {
     /// for. None = never seen.
     #[serde(default)]
     last_seen_version: Option<String>,
+    /// Privacy mode — when on, every Casual Office window opts into
+    /// platform-level "content protection" so OS screenshots and screen
+    /// recordings produce black frames where the editor is. Honored on
+    /// Windows (DwmSetWindowAttribute) and macOS (NSWindow
+    /// sharingType=none). On Linux/WebKitGTK there is no equivalent API,
+    /// so the flag is a stored preference but has no runtime effect —
+    /// surface that clearly in the UI rather than implying false safety.
+    #[serde(default)]
+    privacy_mode: bool,
 }
 
 impl Default for Settings {
@@ -511,6 +528,7 @@ impl Default for Settings {
             default_save_dir: None,
             open_window_preference: None,
             last_seen_version: None,
+            privacy_mode: false,
         }
     }
 }
@@ -646,11 +664,25 @@ fn get_settings(app: AppHandle) -> Settings {
     serde_json::from_slice(&bytes).unwrap_or_default()
 }
 
+/// Apply the privacy-mode flag to every open window. On Windows and
+/// macOS this opts the window into the platform's "content protection"
+/// path so OS screenshots and screen-recordings render the window as
+/// black frames. On Linux there's no equivalent compositor API; the
+/// call still returns Ok and the preference is preserved, but screenshots
+/// will still capture the window content. Surface that limitation in
+/// the Settings UI so users aren't misled.
+fn apply_privacy_to_all_windows(app: &AppHandle, enabled: bool) {
+    for window in app.webview_windows().values() {
+        let _ = window.set_content_protected(enabled);
+    }
+}
+
 #[tauri::command]
 fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, String> {
     let path = settings_path(&app)?;
     let bytes = serde_json::to_vec_pretty(&settings).map_err(|e| e.to_string())?;
     std::fs::write(&path, bytes).map_err(|e| e.to_string())?;
+    apply_privacy_to_all_windows(&app, settings.privacy_mode);
     Ok(settings)
 }
 
@@ -698,12 +730,47 @@ fn open_file_path(app: &AppHandle, path: String) {
     let mut url = format!("{}?desk=1&file=", kind.subpath());
     url.push_str(&urlencoding_lite(&path));
 
-    let _ = WebviewWindowBuilder::new(app, &label, WebviewUrl::App(url.into()))
+    let built = WebviewWindowBuilder::new(app, &label, WebviewUrl::App(url.into()))
         .title(&title)
         .inner_size(1280.0, 860.0)
         .min_inner_size(720.0, 480.0)
         .resizable(true)
+        .maximized(true)
+        .focused(true)
         .build();
+
+    // Linux focus-stealing prevention: when the user double-clicks a
+    // file in their file manager, the file manager owns the WM's
+    // "active app" stamp. set_focus() is demoted to an urgency hint
+    // and the user has to alt-tab to start typing. Two reinforcements:
+    //
+    //   1. Brief always_on_top toggle — convinces the WM the raise is
+    //      user-initiated. Fast editors (sheets / Univer) get focus
+    //      from this alone.
+    //   2. Repeat set_focus on a delay — for docx specifically, the
+    //      PagedEditor + ProseMirror init takes 1.5–3 s with a real
+    //      document, during which the page-load triggers focus events
+    //      that the WM evaluates against an unmapped surface. By the
+    //      time the editor is interactive, the file manager has won.
+    //      Firing set_focus again at 250 / 800 / 1500 ms covers the
+    //      mount window without leaving the user fighting for focus.
+    if let Ok(window) = built {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_always_on_top(true);
+        let _ = window.set_focus();
+        let _ = window.set_always_on_top(false);
+        if get_settings(app.clone()).privacy_mode {
+            let _ = window.set_content_protected(true);
+        }
+        let w = window.clone();
+        std::thread::spawn(move || {
+            for delay_ms in [250u64, 800, 1500] {
+                std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+                let _ = w.set_focus();
+            }
+        });
+    }
 
     if let Some(state) = app.try_state::<RecentsState>() {
         touch_recent(app, &state, &path);
@@ -715,17 +782,22 @@ fn get_app_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
+
 // --- App entry --------------------------------------------------------------
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            // A second `casual-office <file>` invocation arrived (or just
-            // a bare `casual-office` re-launch). Forward any openable file
-            // to the running instance; raise the launcher either way.
+            // A second invocation arrived. Two cases:
+            //   - `casual-office <file>` → open the file; DON'T raise the
+            //     launcher (the user double-clicked a doc; the launcher
+            //     popping up alongside is the "two windows" complaint).
+            //   - bare `casual-office` → user re-launched the app itself;
+            //     bring the launcher to front.
             if let Some(path) = first_openable_path(&args) {
                 open_file_path(app, path);
+                return;
             }
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.show();
@@ -746,14 +818,22 @@ pub fn run() {
             // the menu provided still work via the in-page bindShortcuts
             // listener.)
 
-            // Initial argv: if the OS launched us via a file association,
-            // argv contains the path. Open it in a doc window once the app
-            // is up. Done synchronously inside setup() — the app handle is
-            // already valid and WebviewWindowBuilder::build returns
-            // immediately.
+            // Initial argv handling — the launcher window is declared
+            // with visible: false in tauri.conf.json so we can decide
+            // whether to show it based on what the user actually
+            // wanted:
+            //   - launched with a file path (file-manager double-click,
+            //     `casual-office foo.docx`) → spawn the doc window and
+            //     leave the launcher hidden. The user wanted to edit a
+            //     file; popping up the home screen alongside is noise.
+            //   - launched with no file path (clicking the app icon) →
+            //     show the launcher.
             let args: Vec<String> = std::env::args().collect();
             if let Some(path) = first_openable_path(&args) {
                 open_file_path(&app.handle(), path);
+            } else if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.set_focus();
             }
             Ok(())
         })

@@ -25,6 +25,7 @@ export interface MockState {
     default_save_dir: string | null;
     open_window_preference?: 'ask' | 'same' | 'new';
     last_seen_version?: string | null;
+    privacy_mode?: boolean;
   };
   recents: Array<{
     path: string;
