@@ -104,12 +104,12 @@ jobs:
         run: |
           git clone --depth 1 --branch desk_v0.0.0/no-cdn-fonts \
             https://github.com/schnsrw/sheets.git sheets
-          # Don't use --frozen-lockfile: the sheets repo currently has
-          # `patchedDependencies` in package.json that drifted out of
-          # sync with the lockfile after the upstream main merge.
-          # Plain `pnpm install` lets it reconcile in CI. Lockfile
-          # regeneration is a separate cleanup task in the sheets repo.
-          (cd sheets && pnpm install)
+          # `--no-frozen-lockfile` is required because pnpm v9 enables
+          # frozen-lockfile by default whenever CI=true (GitHub Actions
+          # sets it). The sheets lockfile is out of sync with the
+          # `patchedDependencies` block added during the upstream main
+          # merge — pnpm reconciles cleanly given permission to write.
+          (cd sheets && pnpm install --no-frozen-lockfile)
 
       - name: Build docx editor
         working-directory: docx/docx-editor/examples/vite
@@ -122,8 +122,9 @@ jobs:
       - name: Install shell deps
         # Same reason as the sheets install: keep CI tolerant of small
         # lockfile drifts so a single dependency edit doesn't gate a
-        # release. Locally we still use --frozen-lockfile via Husky.
-        run: pnpm install
+        # release. Plain `pnpm install` still picks up CI=true and
+        # forces frozen mode, hence the explicit flag.
+        run: pnpm install --no-frozen-lockfile
 
       - name: Copy editor dists into shell
         working-directory: apps/shell
