@@ -77,6 +77,12 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install tauri-cli
+        # `cargo tauri build` requires the CLI binary on PATH. We
+        # don't pin a workspace tauri-cli, so install it once
+        # against the same major version as the runtime crate.
+        run: cargo install tauri-cli --version "^2" --locked
+
       - name: Cache cargo registry + target
         uses: actions/cache@v4
         with:
